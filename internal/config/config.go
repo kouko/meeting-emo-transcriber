@@ -1,0 +1,138 @@
+package config
+
+import (
+	"os"
+	"path/filepath"
+	"runtime"
+	"strings"
+
+	"github.com/spf13/viper"
+)
+
+// Models holds paths for the three ML model files.
+type Models struct {
+	Whisper  string
+	Speaker  string
+	Emotion  string
+}
+
+// Config holds all application configuration.
+type Config struct {
+	Language  string
+	Threshold float64
+	Format    string
+	Strategy  string
+	Discover  bool
+	LogLevel  string
+	Threads   int
+	Models    Models
+}
+
+// defaultModelsDir returns ~/.meeting-emo-transcriber/models/
+func defaultModelsDir() string {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		home = "."
+	}
+	return filepath.Join(home, ".meeting-emo-transcriber", "models")
+}
+
+// Defaults returns a Config populated with sensible defaults.
+func Defaults() Config {
+	modelsDir := defaultModelsDir()
+	return Config{
+		Language:  "auto",
+		Threshold: 0.6,
+		Format:    "txt",
+		Strategy:  "max_similarity",
+		Discover:  true,
+		LogLevel:  "info",
+		Threads:   runtime.NumCPU(),
+		Models: Models{
+			Whisper:  "",
+			Speaker:  filepath.Join(modelsDir, "campplus_sv_zh-cn.onnx"),
+			Emotion:  filepath.Join(modelsDir, "sensevoice-small-int8.onnx"),
+		},
+	}
+}
+
+// Load reads configuration with the following priority (highest to lowest):
+//  1. Explicit config file at configPath
+//  2. speakers/config.yaml inside speakersDir
+//  3. Built-in defaults
+//
+// Either configPath or speakersDir may be empty string.
+func Load(configPath, speakersDir string) (Config, error) {
+	v := viper.New()
+
+	// Set defaults.
+	d := Defaults()
+	v.SetDefault("language", d.Language)
+	v.SetDefault("threshold", d.Threshold)
+	v.SetDefault("format", d.Format)
+	v.SetDefault("strategy", d.Strategy)
+	v.SetDefault("discover", d.Discover)
+	v.SetDefault("loglevel", d.LogLevel)
+	v.SetDefault("threads", d.Threads)
+	v.SetDefault("models.whisper", d.Models.Whisper)
+	v.SetDefault("models.speaker", d.Models.Speaker)
+	v.SetDefault("models.emotion", d.Models.Emotion)
+
+	if configPath != "" {
+		// Explicit config path takes highest priority.
+		v.SetConfigFile(configPath)
+		if err := v.ReadInConfig(); err != nil {
+			return Config{}, err
+		}
+	} else if speakersDir != "" {
+		// Try speakers/config.yaml as optional config.
+		v.SetConfigName("config")
+		v.SetConfigType("yaml")
+		v.AddConfigPath(speakersDir)
+		// Ignore error when file doesn't exist.
+		_ = v.ReadInConfig()
+	}
+
+	cfg := Config{
+		Language:  v.GetString("language"),
+		Threshold: v.GetFloat64("threshold"),
+		Format:    v.GetString("format"),
+		Strategy:  v.GetString("strategy"),
+		Discover:  v.GetBool("discover"),
+		LogLevel:  v.GetString("loglevel"),
+		Threads:   v.GetInt("threads"),
+		Models: Models{
+			Whisper: v.GetString("models.whisper"),
+			Speaker: v.GetString("models.speaker"),
+			Emotion: v.GetString("models.emotion"),
+		},
+	}
+	return cfg, nil
+}
+
+// allFormats is the canonical list of supported output formats.
+var allFormats = []string{"txt", "json", "srt"}
+
+// ParseFormats parses a comma-separated format string into a slice of format names.
+// The special value "all" expands to all supported formats.
+func ParseFormats(format string) []string {
+	if strings.EqualFold(strings.TrimSpace(format), "all") {
+		result := make([]string, len(allFormats))
+		copy(result, allFormats)
+		return result
+	}
+	parts := strings.Split(format, ",")
+	out := make([]string, 0, len(parts))
+	for _, p := range parts {
+		p = strings.TrimSpace(p)
+		if p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
+// SupportedAudioExtensions returns the list of audio file extensions this tool handles.
+func SupportedAudioExtensions() []string {
+	return []string{".wav", ".mp3", ".m4a", ".flac", ".ogg", ".opus", ".aac", ".mp4", ".mkv", ".webm"}
+}
