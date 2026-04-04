@@ -1,6 +1,7 @@
 package asr
 
 import (
+	"strings"
 	"testing"
 )
 
@@ -168,5 +169,49 @@ func TestParseSRTWhitespace(t *testing.T) {
 	}
 	if results != nil {
 		t.Errorf("expected nil results for whitespace input, got %v", results)
+	}
+}
+
+func TestBuildWhisperArgs(t *testing.T) {
+	cfg := WhisperConfig{
+		BinPath:      "/path/to/whisper-cli",
+		ModelPath:    "/path/to/model.bin",
+		VADModelPath: "/path/to/vad.bin",
+		Language:     "auto",
+		Threads:      4,
+	}
+
+	args := buildWhisperArgs(cfg, "/tmp/input.wav", "/tmp/output")
+	joined := strings.Join(args, " ")
+
+	checks := []string{
+		"-m /path/to/model.bin",
+		"-f /tmp/input.wav",
+		"-l auto",
+		"-t 4",
+		"-osrt",
+		"-of /tmp/output",
+		"--no-prints",
+		"--vad",
+		"-vm /path/to/vad.bin",
+	}
+	for _, check := range checks {
+		if !strings.Contains(joined, check) {
+			t.Errorf("missing %q in args: %s", check, joined)
+		}
+	}
+}
+
+func TestBuildWhisperArgsNoVAD(t *testing.T) {
+	cfg := WhisperConfig{
+		BinPath:   "/path/to/whisper-cli",
+		ModelPath: "/path/to/model.bin",
+		Language:  "ja",
+		Threads:   8,
+	}
+	args := buildWhisperArgs(cfg, "/tmp/input.wav", "/tmp/output")
+	joined := strings.Join(args, " ")
+	if strings.Contains(joined, "--vad") {
+		t.Error("should not contain --vad when VADModelPath is empty")
 	}
 }
