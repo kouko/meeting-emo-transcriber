@@ -29,6 +29,9 @@ Thumbs.db
 # Go
 vendor/
 
+# Build artifacts (whisper.cpp clone, onnxruntime download cache)
+.build/
+
 # Temp files
 *.tmp
 *.wav.tmp
