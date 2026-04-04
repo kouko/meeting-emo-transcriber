@@ -14,15 +14,13 @@ bash "$SCRIPT_DIR/build-whisper.sh"
 echo ""
 bash "$SCRIPT_DIR/download-ffmpeg.sh"
 echo ""
-bash "$SCRIPT_DIR/download-onnxruntime.sh"
-echo ""
 
 echo "=========================================="
 echo "  Verification"
 echo "=========================================="
 
 PASS=true
-for f in whisper-cli ffmpeg libonnxruntime.dylib; do
+for f in whisper-cli ffmpeg; do
     if [ -f "$OUTPUT_DIR/$f" ]; then
         SIZE=$(ls -lh "$OUTPUT_DIR/$f" | awk '{print $5}')
         echo "  ✓ $f ($SIZE)"

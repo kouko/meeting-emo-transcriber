@@ -1,6 +1,7 @@
 package models
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -9,7 +10,9 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strings"
 
 	"github.com/kouko/meeting-emo-transcriber/internal/embedded"
 )
@@ -42,7 +45,7 @@ func EnsureModel(name string) (string, error) {
 		return "", fmt.Errorf("create models dir: %w", err)
 	}
 
-	dest := filepath.Join(dir, name+".bin")
+	dest := filepath.Join(dir, modelFilename(name, info.URL))
 	manifestPath := filepath.Join(dir, manifestFile)
 
 	manifest, err := loadManifest(manifestPath)
@@ -60,6 +63,11 @@ func EnsureModel(name string) (string, error) {
 			// Hash mismatch — fall through to re-download.
 			fmt.Fprintf(os.Stderr, "warning: cached %s has wrong hash, re-downloading\n", name)
 		}
+	}
+
+	// Dispatch to archive handler for .tar.bz2 models.
+	if info.IsArchive {
+		return ensureArchiveModel(name, info, dir, dest, manifest, manifestPath)
 	}
 
 	// Download the model.
@@ -179,6 +187,48 @@ func loadManifest(path string) (map[string]manifestEntry, error) {
 		return nil, err
 	}
 	return m, nil
+}
+
+// ensureArchiveModel downloads a .tar.bz2 archive, extracts it, renames the
+// extracted directory to destDir, and updates the manifest.
+func ensureArchiveModel(name string, info ModelInfo, modelsDir, destDir string, manifest map[string]manifestEntry, manifestPath string) (string, error) {
+	fmt.Fprintf(os.Stderr, "Downloading %s (%s)...\n", name, formatSize(info.Size))
+	tmpFile := filepath.Join(modelsDir, name+".tar.bz2.tmp")
+	if err := downloadFile(tmpFile, info.URL, info.Size); err != nil {
+		return "", fmt.Errorf("download %s: %w", name, err)
+	}
+	defer os.Remove(tmpFile)
+
+	cmd := exec.Command("tar", "xjf", tmpFile, "-C", modelsDir)
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		return "", fmt.Errorf("extract %s: %w\nstderr: %s", name, err, stderr.String())
+	}
+
+	// Find extracted directory and rename to destDir.
+	entries, err := os.ReadDir(modelsDir)
+	if err != nil {
+		return "", fmt.Errorf("read models dir: %w", err)
+	}
+	for _, entry := range entries {
+		if entry.IsDir() && strings.Contains(entry.Name(), "sherpa-onnx-sense-voice") {
+			extractedDir := filepath.Join(modelsDir, entry.Name())
+			if extractedDir != destDir {
+				os.RemoveAll(destDir)
+				if err := os.Rename(extractedDir, destDir); err != nil {
+					return "", fmt.Errorf("rename %s to %s: %w", extractedDir, destDir, err)
+				}
+			}
+			break
+		}
+	}
+
+	manifest[name] = manifestEntry{SHA256: "", Size: info.Size}
+	if err := saveManifest(manifestPath, manifest); err != nil {
+		return "", fmt.Errorf("save manifest: %w", err)
+	}
+	return destDir, nil
 }
 
 // saveManifest writes the manifest map to path as indented JSON.

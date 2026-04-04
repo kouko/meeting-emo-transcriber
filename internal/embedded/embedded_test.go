@@ -99,9 +99,8 @@ func TestVersionsJSON(t *testing.T) {
 
 	// Write some data and read back.
 	want := map[string]string{
-		"/path/to/bin/whisper-cli":         "abc123",
-		"/path/to/bin/ffmpeg":              "def456",
-		"/path/to/bin/libonnxruntime.dylib": "ghi789",
+		"/path/to/bin/whisper-cli": "abc123",
+		"/path/to/bin/ffmpeg":      "def456",
 	}
 	if err := saveVersions(versionsPath, want); err != nil {
 		t.Fatalf("saveVersions: %v", err)
@@ -159,12 +158,9 @@ func TestExtractAllCreatesDirectory(t *testing.T) {
 	if paths.FFmpeg == "" {
 		t.Error("BinPaths.FFmpeg is empty")
 	}
-	if paths.ONNXRuntime == "" {
-		t.Error("BinPaths.ONNXRuntime is empty")
-	}
 
 	// Paths must reside inside bin/.
-	for _, p := range []string{paths.WhisperCLI, paths.FFmpeg, paths.ONNXRuntime} {
+	for _, p := range []string{paths.WhisperCLI, paths.FFmpeg} {
 		rel, err := filepath.Rel(binDir, p)
 		if err != nil || rel == "" {
 			t.Errorf("path %q is not under binDir %q", p, binDir)
@@ -172,7 +168,7 @@ func TestExtractAllCreatesDirectory(t *testing.T) {
 	}
 
 	// Binary files must exist on disk.
-	for _, p := range []string{paths.WhisperCLI, paths.FFmpeg, paths.ONNXRuntime} {
+	for _, p := range []string{paths.WhisperCLI, paths.FFmpeg} {
 		if _, err := os.Stat(p); err != nil {
 			t.Errorf("binary file %q does not exist: %v", p, err)
 		}

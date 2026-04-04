@@ -50,3 +50,47 @@ func TestModelsDir(t *testing.T) {
 		t.Error("ModelsDir() returned empty string")
 	}
 }
+
+func TestRegistryContainsSpeakerModel(t *testing.T) {
+	info, ok := Registry["campplus-sv-zh-cn"]
+	if !ok {
+		t.Fatal("Registry missing campplus-sv-zh-cn")
+	}
+	if info.Category != "speaker" {
+		t.Errorf("Category = %q, want \"speaker\"", info.Category)
+	}
+	if info.URL == "" {
+		t.Error("URL is empty")
+	}
+}
+
+func TestRegistryContainsEmotionModel(t *testing.T) {
+	info, ok := Registry["sensevoice-small-int8"]
+	if !ok {
+		t.Fatal("Registry missing sensevoice-small-int8")
+	}
+	if info.Category != "emotion" {
+		t.Errorf("Category = %q, want \"emotion\"", info.Category)
+	}
+	if !info.IsArchive {
+		t.Error("expected IsArchive = true for sensevoice")
+	}
+}
+
+func TestModelFilename(t *testing.T) {
+	tests := []struct {
+		name, url, expected string
+	}{
+		{"ggml-large-v3", "https://example.com/model.bin", "ggml-large-v3.bin"},
+		{"campplus-sv-zh-cn", "https://example.com/model.onnx", "campplus-sv-zh-cn.onnx"},
+		{"sensevoice-small-int8", "https://example.com/archive.tar.bz2", "sensevoice-small-int8"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := modelFilename(tt.name, tt.url)
+			if got != tt.expected {
+				t.Errorf("modelFilename(%q, %q) = %q, want %q", tt.name, tt.url, got, tt.expected)
+			}
+		})
+	}
+}

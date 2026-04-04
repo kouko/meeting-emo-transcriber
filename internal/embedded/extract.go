@@ -10,7 +10,6 @@ import (
 // embed_prod.go overrides them via init() when built with the "embed" build tag.
 var whisperCLIData = func() []byte { return []byte("whisper-cli-placeholder") }
 var ffmpegData = func() []byte { return []byte("ffmpeg-placeholder") }
-var onnxRuntimeData = func() []byte { return []byte("onnxruntime-placeholder") }
 
 // binSpec describes a single binary to be extracted.
 type binSpec struct {
@@ -39,7 +38,6 @@ func ExtractAll() (BinPaths, error) {
 	specs := []binSpec{
 		{name: "whisper-cli", perm: 0755, dataFunc: whisperCLIData},
 		{name: "ffmpeg", perm: 0755, dataFunc: ffmpegData},
-		{name: "libonnxruntime.dylib", perm: 0644, dataFunc: onnxRuntimeData},
 	}
 
 	paths := make(map[string]string, len(specs))
@@ -61,8 +59,7 @@ func ExtractAll() (BinPaths, error) {
 	}
 
 	return BinPaths{
-		WhisperCLI:  paths["whisper-cli"],
-		FFmpeg:      paths["ffmpeg"],
-		ONNXRuntime: paths["libonnxruntime.dylib"],
+		WhisperCLI: paths["whisper-cli"],
+		FFmpeg:     paths["ffmpeg"],
 	}, nil
 }
