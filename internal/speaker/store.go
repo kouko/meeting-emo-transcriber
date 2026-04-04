@@ -29,6 +29,11 @@ func NewStore(dir string, audioExts []string) *Store {
 	return &Store{root: dir, audioExts: extSet}
 }
 
+// Root returns the root directory path of the speaker store.
+func (s *Store) Root() string {
+	return s.root
+}
+
 // List returns the names of all subdirectories in the root (each is a speaker).
 // Returns an empty slice (not an error) if the root does not exist.
 func (s *Store) List() ([]string, error) {

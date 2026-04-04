@@ -198,3 +198,11 @@ func TestStore_NeedsUpdate_Unchanged(t *testing.T) {
 		t.Error("expected NeedsUpdate=false when unchanged")
 	}
 }
+
+func TestStoreRoot(t *testing.T) {
+	dir := t.TempDir()
+	store := NewStore(dir, []string{".wav"})
+	if store.Root() != dir {
+		t.Errorf("Root() = %q, want %q", store.Root(), dir)
+	}
+}
