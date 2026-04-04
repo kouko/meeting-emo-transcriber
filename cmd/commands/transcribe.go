@@ -11,8 +11,10 @@ import (
 	"github.com/kouko/meeting-emo-transcriber/internal/audio"
 	"github.com/kouko/meeting-emo-transcriber/internal/config"
 	"github.com/kouko/meeting-emo-transcriber/internal/embedded"
+	"github.com/kouko/meeting-emo-transcriber/internal/emotion"
 	"github.com/kouko/meeting-emo-transcriber/internal/models"
 	"github.com/kouko/meeting-emo-transcriber/internal/output"
+	"github.com/kouko/meeting-emo-transcriber/internal/speaker"
 	"github.com/kouko/meeting-emo-transcriber/internal/types"
 	"github.com/spf13/cobra"
 )
@@ -85,19 +87,99 @@ func newTranscribeCmd() *cobra.Command {
 				return fmt.Errorf("transcribe: %w", err)
 			}
 
-			// 8. Build TranscriptResult (Phase 2: no speaker/emotion)
+			// 8. Ensure speaker and emotion models
+			speakerModelPath, err := models.EnsureModel("campplus-sv-zh-cn")
+			if err != nil {
+				return fmt.Errorf("ensure speaker model: %w", err)
+			}
+			emotionModelDir, err := models.EnsureModel("sensevoice-small-int8")
+			if err != nil {
+				return fmt.Errorf("ensure emotion model: %w", err)
+			}
+
+			// 9. Initialize extractor and classifier
+			extractor, err := speaker.NewExtractor(speakerModelPath, cfg.Threads)
+			if err != nil {
+				return fmt.Errorf("init speaker extractor: %w", err)
+			}
+			defer extractor.Close()
+
+			classifier, err := emotion.NewClassifier(emotionModelDir, cfg.Threads)
+			if err != nil {
+				return fmt.Errorf("init emotion classifier: %w", err)
+			}
+			defer classifier.Close()
+
+			// 10. Load speaker profiles + create matcher
+			store := speaker.NewStore(speakersDir, config.SupportedAudioExtensions())
+			profiles, err := store.LoadProfiles()
+			if err != nil {
+				return fmt.Errorf("load speaker profiles: %w", err)
+			}
+			matcher := speaker.NewMatcher(&speaker.MaxSimilarityStrategy{})
+
+			// 11. Read full WAV for segment extraction
+			wavSamples, wavSampleRate, err := audio.ReadWAV(tempWavPath)
+			if err != nil {
+				return fmt.Errorf("read WAV: %w", err)
+			}
+
+			// 12. Process each ASR segment
 			segments := make([]types.TranscriptSegment, 0, len(results))
 			for _, r := range results {
+				segAudio := audio.ExtractSegment(wavSamples, wavSampleRate, r.Start, r.End)
+
+				// Speaker identification
+				speakerName := "Unknown"
+				var speakerConf float32
+				if len(segAudio) > 0 && len(profiles) > 0 {
+					emb, embErr := extractor.Extract(segAudio, wavSampleRate)
+					if embErr == nil {
+						matchResult := matcher.Match(emb, profiles, float32(cfg.Threshold))
+						if matchResult.Name != "" {
+							speakerName = matchResult.Name
+						}
+						speakerConf = matchResult.Similarity
+					}
+				}
+
+				// Emotion classification
+				emotionInfo := types.EmotionInfo{Label: "Neutral", Display: ""}
+				audioEvent := "Speech"
+				var emotionConf float32
+				if len(segAudio) > 0 {
+					emotionResult, event, classErr := classifier.Classify(segAudio, wavSampleRate)
+					if classErr == nil {
+						emotionInfo = types.EmotionInfo{
+							Raw:     emotionResult.Raw,
+							Label:   emotionResult.Label,
+							Display: emotionResult.Display,
+						}
+						audioEvent = event
+						emotionConf = emotionResult.Confidence
+					}
+				}
+
 				segments = append(segments, types.TranscriptSegment{
 					Start:      r.Start,
 					End:        r.End,
-					Speaker:    "Unknown",
-					Emotion:    types.EmotionInfo{Label: "Neutral", Display: ""},
-					AudioEvent: "Speech",
+					Speaker:    speakerName,
+					Emotion:    emotionInfo,
+					AudioEvent: audioEvent,
 					Language:   r.Language,
 					Text:       r.Text,
-					Confidence: types.Confidence{Speaker: 0, Emotion: 0},
+					Confidence: types.Confidence{Speaker: speakerConf, Emotion: emotionConf},
 				})
+			}
+
+			// 13. Build metadata with speaker counts
+			speakerSet := make(map[string]bool)
+			identified := 0
+			for _, seg := range segments {
+				speakerSet[seg.Speaker] = true
+				if seg.Speaker != "Unknown" {
+					identified++
+				}
 			}
 
 			// Calculate duration from last result's End time
@@ -110,8 +192,8 @@ func newTranscribeCmd() *cobra.Command {
 				Metadata: types.Metadata{
 					File:               filepath.Base(inputPath),
 					Duration:           time.Duration(duration * float64(time.Second)).String(),
-					SpeakersDetected:   0,
-					SpeakersIdentified: 0,
+					SpeakersDetected:   len(speakerSet),
+					SpeakersIdentified: identified,
 					Date:               time.Now().Format(time.RFC3339),
 				},
 				Segments: segments,
