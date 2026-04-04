@@ -1,0 +1,34 @@
+# Binaries
+meeting-emo-transcriber
+*.exe
+
+# Embedded binaries (build-time generated)
+embedded/binaries/
+
+# Models
+models/
+*.bin
+*.onnx
+
+# Speakers data (personal voiceprints)
+speakers/
+
+# Output
+output/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Go
+vendor/
+
+# Temp files
+*.tmp
+*.wav.tmp
