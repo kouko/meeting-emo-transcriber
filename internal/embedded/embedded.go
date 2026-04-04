@@ -14,9 +14,8 @@ import (
 
 // BinPaths holds absolute paths to the extracted binaries.
 type BinPaths struct {
-	WhisperCLI  string
-	FFmpeg      string
-	ONNXRuntime string
+	WhisperCLI string
+	FFmpeg     string
 }
 
 // CacheDir returns the root cache directory for extracted binaries.
