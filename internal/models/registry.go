@@ -51,7 +51,7 @@ var Registry = map[string]ModelInfo{
 	},
 	"campplus-sv-zh-cn": {
 		Name:     "campplus-sv-zh-cn",
-		URL:      "https://github.com/k2-fsa/sherpa-onnx/releases/download/speaker-recongition-models/3dspeaker_speech_campplus_sv_zh-cn_16k-common_advanced.onnx",
+		URL:      "https://github.com/k2-fsa/sherpa-onnx/releases/download/speaker-recongition-models/3dspeaker_speech_campplus_sv_zh-cn_16k-common.onnx",
 		SHA256:   "",
 		Size:     30000000,
 		Category: "speaker",
