@@ -191,7 +191,6 @@ func TestBuildWhisperArgs(t *testing.T) {
 		"-t 4",
 		"-osrt",
 		"-of /tmp/output",
-		"-np",
 	}
 	for _, check := range checks {
 		if !strings.Contains(joined, check) {

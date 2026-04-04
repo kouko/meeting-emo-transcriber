@@ -44,12 +44,14 @@ func newTranscribeCmd() *cobra.Command {
 			}
 
 			// 3. Extract embedded binaries
+			fmt.Fprintf(os.Stderr, "[1/7] Extracting embedded binaries...\n")
 			bins, err := embedded.ExtractAll()
 			if err != nil {
 				return fmt.Errorf("extract binaries: %w", err)
 			}
 
 			// 4. Ensure ASR model
+			fmt.Fprintf(os.Stderr, "[2/7] Ensuring ASR model...\n")
 			asrModelName := models.ResolveASRModel(language)
 			asrModelPath, err := models.EnsureModel(asrModelName)
 			if err != nil {
@@ -57,6 +59,7 @@ func newTranscribeCmd() *cobra.Command {
 			}
 
 			// 5. Ensure VAD model
+			fmt.Fprintf(os.Stderr, "[3/7] Ensuring VAD model...\n")
 			vadModelPath, err := models.EnsureModel("silero-vad-v6.2.0")
 			if err != nil {
 				return fmt.Errorf("ensure VAD model: %w", err)
@@ -69,12 +72,14 @@ func newTranscribeCmd() *cobra.Command {
 			}
 			defer os.RemoveAll(tmpDir)
 
+			fmt.Fprintf(os.Stderr, "[4/7] Converting audio to WAV...\n")
 			tempWavPath := filepath.Join(tmpDir, "audio.wav")
 			if err := audio.ConvertToWAV(bins.FFmpeg, inputPath, tempWavPath); err != nil {
 				return fmt.Errorf("convert to WAV: %w", err)
 			}
 
 			// 7. Run ASR
+			fmt.Fprintf(os.Stderr, "[5/7] Running speech recognition...\n")
 			whisperCfg := asr.WhisperConfig{
 				BinPath:      bins.WhisperCLI,
 				ModelPath:    asrModelPath,
@@ -88,6 +93,7 @@ func newTranscribeCmd() *cobra.Command {
 			}
 
 			// 8. Ensure speaker and emotion models
+			fmt.Fprintf(os.Stderr, "[6/7] Running speaker identification and emotion classification...\n")
 			speakerModelPath, err := models.EnsureModel("campplus-sv-zh-cn")
 			if err != nil {
 				return fmt.Errorf("ensure speaker model: %w", err)
@@ -201,6 +207,7 @@ func newTranscribeCmd() *cobra.Command {
 			}
 
 			// 9 & 10. Format and write output files
+			fmt.Fprintf(os.Stderr, "[7/7] Writing output files...\n")
 			formats := config.ParseFormats(format)
 			for _, fmt_ := range formats {
 				outPath := resolveOutputPath(inputPath, outputPath, fmt_)

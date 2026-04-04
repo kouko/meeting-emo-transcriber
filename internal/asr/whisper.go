@@ -1,7 +1,6 @@
 package asr
 
 import (
-	"bytes"
 	"fmt"
 	"os"
 	"os/exec"
@@ -28,7 +27,6 @@ func buildWhisperArgs(cfg WhisperConfig, wavPath, outputBase string) []string {
 		"-t", strconv.Itoa(cfg.Threads),
 		"-osrt",
 		"-of", outputBase,
-		"-np",
 	}
 	// VAD support: only add flags if whisper-cli version supports them.
 	// v1.7.3 does not have --vad; later versions do.
@@ -52,11 +50,10 @@ func Transcribe(cfg WhisperConfig, wavPath string) ([]types.ASRResult, error) {
 	args := buildWhisperArgs(cfg, wavPath, outputBase)
 
 	cmd := exec.Command(cfg.BinPath, args...)
-	var stderr bytes.Buffer
-	cmd.Stderr = &stderr
+	cmd.Stderr = os.Stderr
 
 	if err := cmd.Run(); err != nil {
-		return nil, fmt.Errorf("whisper-cli failed: %w\nstderr: %s", err, stderr.String())
+		return nil, fmt.Errorf("whisper-cli failed: %w", err)
 	}
 
 	srtPath := outputBase + ".srt"
