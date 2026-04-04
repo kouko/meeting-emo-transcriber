@@ -15,6 +15,7 @@ var onnxRuntimeData = func() []byte { return []byte("onnxruntime-placeholder") }
 // binSpec describes a single binary to be extracted.
 type binSpec struct {
 	name     string        // file name inside bin/
+	perm     os.FileMode   // file permissions (0755 for executables, 0644 for libraries)
 	dataFunc func() []byte // data provider
 }
 
@@ -36,9 +37,9 @@ func ExtractAll() (BinPaths, error) {
 	}
 
 	specs := []binSpec{
-		{name: "whisper-cli", dataFunc: whisperCLIData},
-		{name: "ffmpeg", dataFunc: ffmpegData},
-		{name: "libonnxruntime.dylib", dataFunc: onnxRuntimeData},
+		{name: "whisper-cli", perm: 0755, dataFunc: whisperCLIData},
+		{name: "ffmpeg", perm: 0755, dataFunc: ffmpegData},
+		{name: "libonnxruntime.dylib", perm: 0644, dataFunc: onnxRuntimeData},
 	}
 
 	paths := make(map[string]string, len(specs))
@@ -49,7 +50,7 @@ func ExtractAll() (BinPaths, error) {
 			return BinPaths{}, fmt.Errorf("sha256 %s: %w", spec.name, err)
 		}
 		destPath := filepath.Join(binDir, spec.name)
-		if _, err := extractBinary(data, destPath, hash, versions); err != nil {
+		if _, err := extractBinary(data, destPath, spec.perm, hash, versions); err != nil {
 			return BinPaths{}, fmt.Errorf("extract %s: %w", spec.name, err)
 		}
 		paths[spec.name] = destPath

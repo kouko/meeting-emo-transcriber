@@ -41,7 +41,7 @@ func TestExtractBinary(t *testing.T) {
 	versions := map[string]string{}
 
 	// First extraction: file should be written.
-	wrote, err := extractBinary(data, destPath, hash, versions)
+	wrote, err := extractBinary(data, destPath, 0755, hash, versions)
 	if err != nil {
 		t.Fatalf("first extractBinary error: %v", err)
 	}
@@ -73,7 +73,7 @@ func TestExtractBinary(t *testing.T) {
 	}
 
 	// Second extraction with same hash: should skip (return false).
-	wrote2, err := extractBinary(data, destPath, hash, versions)
+	wrote2, err := extractBinary(data, destPath, 0755, hash, versions)
 	if err != nil {
 		t.Fatalf("second extractBinary error: %v", err)
 	}

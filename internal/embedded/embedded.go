@@ -68,16 +68,16 @@ func saveVersions(path string, versions map[string]string) error {
 	return os.WriteFile(path, data, 0644)
 }
 
-// extractBinary writes data to destPath with executable permissions (0755)
+// extractBinary writes data to destPath with the given permissions
 // unless versions[destPath] already equals hash (cache hit).
 // Returns (true, nil) when the file was written, (false, nil) on cache hit.
 // On write, versions[destPath] is updated to hash.
-func extractBinary(data []byte, destPath string, hash string, versions map[string]string) (bool, error) {
+func extractBinary(data []byte, destPath string, perm os.FileMode, hash string, versions map[string]string) (bool, error) {
 	if versions[destPath] == hash {
 		// Cache hit: skip extraction.
 		return false, nil
 	}
-	if err := os.WriteFile(destPath, data, 0755); err != nil {
+	if err := os.WriteFile(destPath, data, perm); err != nil {
 		return false, err
 	}
 	versions[destPath] = hash
