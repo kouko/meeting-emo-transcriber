@@ -117,6 +117,7 @@ func newTranscribeCmd() *cobra.Command {
 				return fmt.Errorf("load speaker profiles: %w", err)
 			}
 			matcher := speaker.NewMatcher(&speaker.MaxSimilarityStrategy{})
+			discovery := speaker.NewDiscovery(store, extractor, matcher, float32(cfg.Threshold), noDiscover)
 
 			// 11. Read full WAV for segment extraction
 			wavSamples, wavSampleRate, err := audio.ReadWAV(tempWavPath)
@@ -132,14 +133,12 @@ func newTranscribeCmd() *cobra.Command {
 				// Speaker identification
 				speakerName := "Unknown"
 				var speakerConf float32
-				if len(segAudio) > 0 && len(profiles) > 0 {
+				if len(segAudio) > 0 {
 					emb, embErr := extractor.Extract(segAudio, wavSampleRate)
 					if embErr == nil {
-						matchResult := matcher.Match(emb, profiles, float32(cfg.Threshold))
-						if matchResult.Name != "" {
-							speakerName = matchResult.Name
-						}
-						speakerConf = matchResult.Similarity
+						speakerName, speakerConf = discovery.IdentifySpeaker(
+							emb, profiles, segAudio, wavSampleRate, r.Start,
+						)
 					}
 				}
 
@@ -177,7 +176,9 @@ func newTranscribeCmd() *cobra.Command {
 			identified := 0
 			for _, seg := range segments {
 				speakerSet[seg.Speaker] = true
-				if seg.Speaker != "Unknown" {
+				if seg.Speaker != "Unknown" &&
+					!strings.HasPrefix(seg.Speaker, "speaker_") &&
+					!strings.HasPrefix(seg.Speaker, "Unknown_") {
 					identified++
 				}
 			}
