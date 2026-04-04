@@ -5,6 +5,7 @@ go 1.25.0
 require (
 	github.com/go-audio/audio v1.0.0
 	github.com/go-audio/wav v1.1.0
+	github.com/k2-fsa/sherpa-onnx-go-macos v1.12.35
 	github.com/spf13/cobra v1.10.2
 	github.com/spf13/viper v1.21.0
 )
