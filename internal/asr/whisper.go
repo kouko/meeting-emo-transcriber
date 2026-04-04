@@ -64,6 +64,7 @@ func Transcribe(cfg WhisperConfig, wavPath string) ([]types.ASRResult, error) {
 	args := buildWhisperArgs(cfg, wavPath, outputBase)
 
 	cmd := exec.Command(cfg.BinPath, args...)
+	cmd.Stdout = os.Stderr // whisper prints transcription to stdout; show it as log
 	cmd.Stderr = os.Stderr
 
 	if err := cmd.Run(); err != nil {

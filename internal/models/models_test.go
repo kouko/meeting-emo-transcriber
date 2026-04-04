@@ -6,12 +6,21 @@ import (
 )
 
 func TestResolveASRModel(t *testing.T) {
-	cases := []string{"auto", "en", "zh-TW", "zh", "ja", "unknown"}
-	for _, lang := range cases {
-		t.Run(lang, func(t *testing.T) {
-			got := ResolveASRModel(lang)
-			if got != "ggml-large-v3" {
-				t.Errorf("ResolveASRModel(%q) = %q; want %q", lang, got, "ggml-large-v3")
+	tests := []struct {
+		lang, want string
+	}{
+		{"auto", "ggml-large-v3"},
+		{"en", "ggml-large-v3"},
+		{"zh-TW", "ggml-breeze-asr-25-q5k"},
+		{"zh", "ggml-belle-zh"},
+		{"ja", "ggml-kotoba-whisper-v2.0"},
+		{"unknown", "ggml-large-v3"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.lang, func(t *testing.T) {
+			got := ResolveASRModel(tt.lang)
+			if got != tt.want {
+				t.Errorf("ResolveASRModel(%q) = %q; want %q", tt.lang, got, tt.want)
 			}
 		})
 	}

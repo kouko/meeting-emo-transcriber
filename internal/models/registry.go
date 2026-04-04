@@ -28,6 +28,27 @@ var Registry = map[string]ModelInfo{
 		Size:     900000,
 		Category: "vad",
 	},
+	"ggml-breeze-asr-25-q5k": {
+		Name:     "ggml-breeze-asr-25-q5k",
+		URL:      "https://huggingface.co/alan314159/Breeze-ASR-25-whispercpp/resolve/main/ggml-model-q5_k.bin",
+		SHA256:   "",
+		Size:     1100000000,
+		Category: "asr",
+	},
+	"ggml-belle-zh": {
+		Name:     "ggml-belle-zh",
+		URL:      "https://huggingface.co/BELLE-2/Belle-whisper-large-v3-turbo-zh-ggml/resolve/main/ggml-model.bin",
+		SHA256:   "",
+		Size:     1500000000,
+		Category: "asr",
+	},
+	"ggml-kotoba-whisper-v2.0": {
+		Name:     "ggml-kotoba-whisper-v2.0",
+		URL:      "https://huggingface.co/kotoba-tech/kotoba-whisper-v2.0-ggml/resolve/main/ggml-kotoba-whisper-v2.0.bin",
+		SHA256:   "",
+		Size:     1520000000,
+		Category: "asr",
+	},
 	"campplus-sv-zh-cn": {
 		Name:     "campplus-sv-zh-cn",
 		URL:      "https://github.com/k2-fsa/sherpa-onnx/releases/download/speaker-recongition-models/3dspeaker_speech_campplus_sv_zh-cn_16k-common_advanced.onnx",
@@ -45,10 +66,18 @@ var Registry = map[string]ModelInfo{
 	},
 }
 
-// ResolveASRModel returns the model name to use for a given language.
-// Phase 2: all languages use ggml-large-v3.
+// ResolveASRModel returns the model name for a given language.
 func ResolveASRModel(language string) string {
-	return "ggml-large-v3"
+	switch language {
+	case "zh-TW":
+		return "ggml-breeze-asr-25-q5k"
+	case "zh":
+		return "ggml-belle-zh"
+	case "ja":
+		return "ggml-kotoba-whisper-v2.0"
+	default: // auto, en
+		return "ggml-large-v3"
+	}
 }
 
 // modelFilename returns the local filename (or directory name for archives) for a model.
