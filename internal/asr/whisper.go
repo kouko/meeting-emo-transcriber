@@ -18,12 +18,26 @@ type WhisperConfig struct {
 	Threads      int
 }
 
+// whisperLang converts our language codes to whisper-cli compatible codes.
+// whisper-cli uses lowercase ISO codes: "zh", "en", "ja", "auto".
+var whisperLang = map[string]string{
+	"zh-TW": "zh",
+	"zh":    "zh",
+	"en":    "en",
+	"ja":    "ja",
+	"auto":  "auto",
+}
+
 // buildWhisperArgs constructs the whisper-cli argument list.
 func buildWhisperArgs(cfg WhisperConfig, wavPath, outputBase string) []string {
+	lang := cfg.Language
+	if mapped, ok := whisperLang[lang]; ok {
+		lang = mapped
+	}
 	args := []string{
 		"-m", cfg.ModelPath,
 		"-f", wavPath,
-		"-l", cfg.Language,
+		"-l", lang,
 		"-t", strconv.Itoa(cfg.Threads),
 		"-osrt",
 		"-of", outputBase,
