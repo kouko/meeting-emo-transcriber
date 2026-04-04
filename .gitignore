@@ -5,8 +5,8 @@ meeting-emo-transcriber
 # Embedded binaries (build-time generated)
 embedded/binaries/
 
-# Models
-models/
+# Models (downloaded model weights at root level, not the Go source package)
+/models/
 *.bin
 *.onnx
 
@@ -28,6 +28,9 @@ Thumbs.db
 
 # Go
 vendor/
+
+# Build artifacts (whisper.cpp clone, onnxruntime download cache)
+.build/
 
 # Temp files
 *.tmp

@@ -2,6 +2,18 @@ package commands
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
+	"time"
+
+	"github.com/kouko/meeting-emo-transcriber/internal/asr"
+	"github.com/kouko/meeting-emo-transcriber/internal/audio"
+	"github.com/kouko/meeting-emo-transcriber/internal/config"
+	"github.com/kouko/meeting-emo-transcriber/internal/embedded"
+	"github.com/kouko/meeting-emo-transcriber/internal/models"
+	"github.com/kouko/meeting-emo-transcriber/internal/output"
+	"github.com/kouko/meeting-emo-transcriber/internal/types"
 	"github.com/spf13/cobra"
 )
 
@@ -18,11 +30,107 @@ func newTranscribeCmd() *cobra.Command {
 		Use:   "transcribe",
 		Short: "Transcribe a meeting recording",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if inputPath == "" {
-				return fmt.Errorf("--input is required")
+			// 1. Validate input file exists
+			if _, err := os.Stat(inputPath); err != nil {
+				return fmt.Errorf("input file not found: %w", err)
 			}
-			fmt.Printf("Transcribe: input=%s speakers=%s format=%s language=%s\n", inputPath, speakersDir, format, language)
-			fmt.Println("(not yet implemented — Phase 2)")
+
+			// 2. Load config
+			cfg, err := config.Load(configPath, speakersDir)
+			if err != nil {
+				return fmt.Errorf("load config: %w", err)
+			}
+
+			// 3. Extract embedded binaries
+			bins, err := embedded.ExtractAll()
+			if err != nil {
+				return fmt.Errorf("extract binaries: %w", err)
+			}
+
+			// 4. Ensure ASR model
+			asrModelName := models.ResolveASRModel(language)
+			asrModelPath, err := models.EnsureModel(asrModelName)
+			if err != nil {
+				return fmt.Errorf("ensure ASR model: %w", err)
+			}
+
+			// 5. Ensure VAD model
+			vadModelPath, err := models.EnsureModel("silero-vad-v6.2.0")
+			if err != nil {
+				return fmt.Errorf("ensure VAD model: %w", err)
+			}
+
+			// 6. Create temp dir and convert to WAV
+			tmpDir, err := os.MkdirTemp("", "met-transcribe-*")
+			if err != nil {
+				return fmt.Errorf("create temp dir: %w", err)
+			}
+			defer os.RemoveAll(tmpDir)
+
+			tempWavPath := filepath.Join(tmpDir, "audio.wav")
+			if err := audio.ConvertToWAV(bins.FFmpeg, inputPath, tempWavPath); err != nil {
+				return fmt.Errorf("convert to WAV: %w", err)
+			}
+
+			// 7. Run ASR
+			whisperCfg := asr.WhisperConfig{
+				BinPath:      bins.WhisperCLI,
+				ModelPath:    asrModelPath,
+				VADModelPath: vadModelPath,
+				Language:     language,
+				Threads:      cfg.Threads,
+			}
+			results, err := asr.Transcribe(whisperCfg, tempWavPath)
+			if err != nil {
+				return fmt.Errorf("transcribe: %w", err)
+			}
+
+			// 8. Build TranscriptResult (Phase 2: no speaker/emotion)
+			segments := make([]types.TranscriptSegment, 0, len(results))
+			for _, r := range results {
+				segments = append(segments, types.TranscriptSegment{
+					Start:      r.Start,
+					End:        r.End,
+					Speaker:    "Unknown",
+					Emotion:    types.EmotionInfo{Label: "Neutral", Display: ""},
+					AudioEvent: "Speech",
+					Language:   r.Language,
+					Text:       r.Text,
+					Confidence: types.Confidence{Speaker: 0, Emotion: 0},
+				})
+			}
+
+			// Calculate duration from last result's End time
+			var duration float64
+			if len(results) > 0 {
+				duration = results[len(results)-1].End
+			}
+
+			transcript := types.TranscriptResult{
+				Metadata: types.Metadata{
+					File:               filepath.Base(inputPath),
+					Duration:           time.Duration(duration * float64(time.Second)).String(),
+					SpeakersDetected:   0,
+					SpeakersIdentified: 0,
+					Date:               time.Now().Format(time.RFC3339),
+				},
+				Segments: segments,
+			}
+
+			// 9 & 10. Format and write output files
+			formats := config.ParseFormats(format)
+			for _, fmt_ := range formats {
+				outPath := resolveOutputPath(inputPath, outputPath, fmt_)
+				content, err := formatTranscript(fmt_, transcript)
+				if err != nil {
+					return fmt.Errorf("format %s: %w", fmt_, err)
+				}
+				if err := os.WriteFile(outPath, []byte(content), 0644); err != nil {
+					return fmt.Errorf("write %s: %w", outPath, err)
+				}
+				fmt.Fprintf(os.Stderr, "Written: %s\n", outPath)
+			}
+
 			return nil
 		},
 	}
@@ -34,4 +142,30 @@ func newTranscribeCmd() *cobra.Command {
 	cmd.Flags().BoolVar(&noDiscover, "no-discover", false, "disable unknown speaker auto-discovery")
 	cmd.MarkFlagRequired("input")
 	return cmd
+}
+
+// resolveOutputPath determines the output file path for a given format.
+func resolveOutputPath(inputPath, outputPath, format string) string {
+	ext := "." + format
+	if outputPath != "" {
+		base := strings.TrimSuffix(outputPath, filepath.Ext(outputPath))
+		return base + ext
+	}
+	base := strings.TrimSuffix(inputPath, filepath.Ext(inputPath))
+	return base + ext
+}
+
+// formatTranscript dispatches to the appropriate formatter.
+func formatTranscript(format string, result types.TranscriptResult) (string, error) {
+	switch format {
+	case "json":
+		f := &output.JSONFormatter{}
+		return f.Format(result)
+	case "srt":
+		f := &output.SRTFormatter{}
+		return f.Format(result)
+	default: // "txt" and anything else
+		f := &output.TXTFormatter{}
+		return f.Format(result)
+	}
 }
