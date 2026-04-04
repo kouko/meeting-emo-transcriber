@@ -76,6 +76,24 @@ func (s *Store) LoadProfiles() ([]types.SpeakerProfile, error) {
 	return profiles, nil
 }
 
+// LoadProfile loads a single speaker's profile.
+// Returns nil, nil if profile doesn't exist.
+func (s *Store) LoadProfile(name string) (*types.SpeakerProfile, error) {
+	profilePath := filepath.Join(s.root, name, profileFilename)
+	data, err := os.ReadFile(profilePath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	var profile types.SpeakerProfile
+	if err := json.Unmarshal(data, &profile); err != nil {
+		return nil, err
+	}
+	return &profile, nil
+}
+
 // SaveProfile writes (or overwrites) the .profile.json for the given speaker,
 // creating the speaker subdirectory if necessary.
 func (s *Store) SaveProfile(profile types.SpeakerProfile) error {
@@ -161,7 +179,7 @@ func (s *Store) NeedsUpdate(speaker string) (bool, error) {
 		if !ok {
 			return true, nil
 		}
-		current, err := fileHash(path)
+		current, err := FileHash(path)
 		if err != nil {
 			return false, err
 		}
@@ -173,9 +191,9 @@ func (s *Store) NeedsUpdate(speaker string) (bool, error) {
 	return false, nil
 }
 
-// fileHash computes the SHA-256 hash of the file at path and returns it as
+// FileHash computes the SHA-256 hash of the file at path and returns it as
 // "sha256:<hex>".
-func fileHash(path string) (string, error) {
+func FileHash(path string) (string, error) {
 	f, err := os.Open(path)
 	if err != nil {
 		return "", err

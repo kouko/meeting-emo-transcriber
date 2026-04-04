@@ -139,11 +139,11 @@ func TestStore_FileHash_Deterministic(t *testing.T) {
 	path := filepath.Join(dir, "test.wav")
 	os.WriteFile(path, []byte("fake audio data"), 0644)
 
-	h1, err := fileHash(path)
+	h1, err := FileHash(path)
 	if err != nil {
 		t.Fatal(err)
 	}
-	h2, err := fileHash(path)
+	h2, err := FileHash(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -179,7 +179,7 @@ func TestStore_NeedsUpdate_Unchanged(t *testing.T) {
 	audioPath := filepath.Join(speakerDir, "sample.wav")
 	os.WriteFile(audioPath, []byte("audio data"), 0644)
 
-	hash, _ := fileHash(audioPath)
+	hash, _ := FileHash(audioPath)
 	profile := types.SpeakerProfile{
 		Name: "Alice",
 		Embeddings: []types.SampleEmbedding{
