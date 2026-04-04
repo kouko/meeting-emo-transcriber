@@ -5,8 +5,8 @@ meeting-emo-transcriber
 # Embedded binaries (build-time generated)
 embedded/binaries/
 
-# Models
-models/
+# Models (downloaded model weights at root level, not the Go source package)
+/models/
 *.bin
 *.onnx
 
