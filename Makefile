@@ -1,4 +1,4 @@
-BINARY_NAME := meeting-emo-transcriber
+BINARY_NAME := metr
 GOOS ?= $(shell uname -s | tr '[:upper:]' '[:lower:]')
 GOARCH ?= $(shell uname -m | sed 's/x86_64/amd64/' | sed 's/aarch64/arm64/')
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")

@@ -23,7 +23,7 @@ brew install ffmpeg
 make all
 
 # Setup
-./meeting-emo-transcriber init
+metr init
 
 # Add speaker samples
 mkdir -p speakers/Alice speakers/Bob
@@ -31,10 +31,10 @@ cp alice_sample.wav speakers/Alice/
 cp bob_sample.wav speakers/Bob/
 
 # Enroll speakers
-./meeting-emo-transcriber enroll
+metr enroll
 
 # Transcribe
-./meeting-emo-transcriber transcribe --input meeting.wav --format all
+metr transcribe --input meeting.wav --format all
 ```
 
 ## Prerequisites
@@ -67,7 +67,7 @@ make info       # show platform and deps status
 ### `transcribe` — Transcribe a meeting recording
 
 ```bash
-meeting-emo-transcriber transcribe --input meeting.wav [flags]
+metr transcribe --input meeting.wav [flags]
 ```
 
 | Flag | Default | Description |
@@ -81,19 +81,19 @@ meeting-emo-transcriber transcribe --input meeting.wav [flags]
 
 ```bash
 # Basic
-meeting-emo-transcriber transcribe --input meeting.wav
+metr transcribe --input meeting.wav
 
 # All formats + Taiwanese Mandarin
-meeting-emo-transcriber transcribe --input meeting.m4a --format all --language zh-TW
+metr transcribe --input meeting.m4a --format all --language zh-TW
 
 # Strict matching, no auto-discovery
-meeting-emo-transcriber transcribe --input meeting.wav --threshold 0.75 --no-discover
+metr transcribe --input meeting.wav --threshold 0.75 --no-discover
 ```
 
 ### `enroll` — Register speaker voiceprints
 
 ```bash
-meeting-emo-transcriber enroll [--force]
+metr enroll [--force]
 ```
 
 Scans `speakers/` for audio samples, computes CAM++ embeddings, saves to `.profile.json`.
@@ -107,13 +107,13 @@ Scanning ./speakers/...
 ### `speakers list` — List registered speakers
 
 ```bash
-meeting-emo-transcriber speakers list
+metr speakers list
 ```
 
 ### `speakers verify` — Test speaker recognition accuracy
 
 ```bash
-meeting-emo-transcriber speakers verify --name Alice --audio test.wav
+metr speakers verify --name Alice --audio test.wav
 ```
 
 ```
@@ -125,7 +125,7 @@ Verifying against Alice...
 ### `init` — Initialize workspace
 
 ```bash
-meeting-emo-transcriber init
+metr init
 ```
 
 Creates `speakers/`, `output/`, and `speakers/config.yaml` template.
