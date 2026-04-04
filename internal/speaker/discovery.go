@@ -75,12 +75,21 @@ func (d *Discovery) IdentifySpeaker(
 		}
 	}
 
-	// 2. Try session unknowns
+	// 2. Try session unknowns (use lower threshold for clustering short segments)
+	// Short audio segments produce less stable embeddings, so we use
+	// threshold * 0.5 for unknown-to-unknown matching, and pick the best match.
+	clusterThreshold := d.threshold * 0.5
+	var bestUnknown string
+	var bestSim float32
 	for _, u := range d.unknowns {
 		sim := CosineSimilarity(embedding, u.embedding)
-		if sim >= d.threshold {
-			return u.name, sim
+		if sim >= clusterThreshold && sim > bestSim {
+			bestUnknown = u.name
+			bestSim = sim
 		}
+	}
+	if bestUnknown != "" {
+		return bestUnknown, bestSim
 	}
 
 	// 3. Create new unknown
