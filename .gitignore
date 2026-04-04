@@ -1,9 +1,11 @@
 # Binaries
 meeting-emo-transcriber
+main
 *.exe
+dist/
 
 # Embedded binaries (build-time generated)
-embedded/binaries/
+embedded/bin/
 
 # Models (downloaded model weights at root level, not the Go source package)
 /models/

@@ -10,7 +10,7 @@ import (
 	"github.com/kouko/meeting-emo-transcriber/internal/asr"
 	"github.com/kouko/meeting-emo-transcriber/internal/audio"
 	"github.com/kouko/meeting-emo-transcriber/internal/config"
-	"github.com/kouko/meeting-emo-transcriber/internal/embedded"
+	"github.com/kouko/meeting-emo-transcriber/embedded"
 	"github.com/kouko/meeting-emo-transcriber/internal/emotion"
 	"github.com/kouko/meeting-emo-transcriber/internal/models"
 	"github.com/kouko/meeting-emo-transcriber/internal/output"

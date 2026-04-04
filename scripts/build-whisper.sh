@@ -4,7 +4,7 @@ set -euo pipefail
 WHISPER_VERSION="v1.7.3"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
-OUTPUT_DIR="$PROJECT_ROOT/embedded/binaries/darwin-arm64"
+OUTPUT_DIR="$PROJECT_ROOT/embedded/bin/darwin-arm64"
 BUILD_DIR="$PROJECT_ROOT/.build/whisper.cpp"
 
 echo "=== Building whisper-cli $WHISPER_VERSION ==="

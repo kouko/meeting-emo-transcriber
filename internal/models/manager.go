@@ -14,7 +14,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/kouko/meeting-emo-transcriber/internal/embedded"
+	"github.com/kouko/meeting-emo-transcriber/embedded"
 )
 
 // manifestFile is the name of the JSON file that tracks downloaded models.
