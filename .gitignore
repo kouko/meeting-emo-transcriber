@@ -13,8 +13,8 @@ models/
 # Speakers data (personal voiceprints)
 speakers/
 
-# Output
-output/
+# Output (user working directory, not internal/output/)
+/output/
 
 # OS files
 .DS_Store
