@@ -28,13 +28,13 @@ type Config struct {
 	Models    Models
 }
 
-// defaultModelsDir returns ~/.meeting-emo-transcriber/models/
+// defaultModelsDir returns ~/.metr/models/
 func defaultModelsDir() string {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		home = "."
 	}
-	return filepath.Join(home, ".meeting-emo-transcriber", "models")
+	return filepath.Join(home, ".metr", "models")
 }
 
 // Defaults returns a Config populated with sensible defaults.

@@ -24,13 +24,13 @@ type BinPaths struct {
 
 // CacheDir returns the root cache directory for extracted binaries.
 // The MET_CACHE_DIR environment variable overrides the default
-// (~/.meeting-emo-transcriber) to simplify testing.
+// (~/.metr) to simplify testing.
 func CacheDir() string {
 	if dir := os.Getenv("MET_CACHE_DIR"); dir != "" {
 		return dir
 	}
 	home, _ := os.UserHomeDir()
-	return filepath.Join(home, ".meeting-emo-transcriber")
+	return filepath.Join(home, ".metr")
 }
 
 // ExtractAll extracts all embedded binaries to CacheDir()/bin/ and returns

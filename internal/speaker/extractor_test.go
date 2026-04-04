@@ -34,9 +34,9 @@ func TestExtractorDim(t *testing.T) {
 func findTestModel(name string) string {
 	home, _ := os.UserHomeDir()
 	candidates := []string{
-		filepath.Join(home, ".meeting-emo-transcriber", "models", name+".onnx"),
-		filepath.Join(home, ".meeting-emo-transcriber", "models", name+".bin"),
-		filepath.Join(home, ".meeting-emo-transcriber", "models", name),
+		filepath.Join(home, ".metr", "models", name+".onnx"),
+		filepath.Join(home, ".metr", "models", name+".bin"),
+		filepath.Join(home, ".metr", "models", name),
 	}
 	for _, p := range candidates {
 		if _, err := os.Stat(p); err == nil {

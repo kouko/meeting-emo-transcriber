@@ -28,11 +28,15 @@ func buildWhisperArgs(cfg WhisperConfig, wavPath, outputBase string) []string {
 		"-t", strconv.Itoa(cfg.Threads),
 		"-osrt",
 		"-of", outputBase,
-		"--no-prints",
+		"-np",
 	}
-	if cfg.VADModelPath != "" {
-		args = append(args, "--vad", "-vm", cfg.VADModelPath)
-	}
+	// VAD support: only add flags if whisper-cli version supports them.
+	// v1.7.3 does not have --vad; later versions do.
+	// For now, VAD flags are disabled to maintain v1.7.3 compatibility.
+	// TODO: re-enable when upgrading whisper.cpp to a version with Silero VAD support.
+	// if cfg.VADModelPath != "" {
+	// 	args = append(args, "--vad", "-vm", cfg.VADModelPath)
+	// }
 	return args
 }
 

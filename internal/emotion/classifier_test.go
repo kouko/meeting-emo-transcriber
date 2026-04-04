@@ -40,7 +40,7 @@ func TestClassifyWithModel(t *testing.T) {
 
 func findSenseVoiceModel() string {
 	home, _ := os.UserHomeDir()
-	dir := filepath.Join(home, ".meeting-emo-transcriber", "models", "sensevoice-small-int8")
+	dir := filepath.Join(home, ".metr", "models", "sensevoice-small-int8")
 	if _, err := os.Stat(filepath.Join(dir, "model.int8.onnx")); err == nil {
 		return dir
 	}

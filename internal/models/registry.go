@@ -23,9 +23,9 @@ var Registry = map[string]ModelInfo{
 	},
 	"silero-vad-v6.2.0": {
 		Name:     "silero-vad-v6.2.0",
-		URL:      "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-silero-v6.2.0.bin",
+		URL:      "https://huggingface.co/ggml-org/whisper-vad/resolve/main/ggml-silero-v6.2.0.bin",
 		SHA256:   "",
-		Size:     2000000,
+		Size:     900000,
 		Category: "vad",
 	},
 	"campplus-sv-zh-cn": {
