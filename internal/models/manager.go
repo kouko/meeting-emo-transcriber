@@ -206,19 +206,24 @@ func ensureArchiveModel(name string, info ModelInfo, modelsDir, destDir string, 
 		return "", fmt.Errorf("extract %s: %w\nstderr: %s", name, err, stderr.String())
 	}
 
-	// Find extracted directory and rename to destDir.
+	// Find the newly extracted directory and rename to destDir.
+	// Archives typically extract to a directory like "sherpa-onnx-<model-name>/".
+	// We find directories that contain the model name as a substring.
 	entries, err := os.ReadDir(modelsDir)
 	if err != nil {
 		return "", fmt.Errorf("read models dir: %w", err)
 	}
 	for _, entry := range entries {
-		if entry.IsDir() && strings.Contains(entry.Name(), "sherpa-onnx-sense-voice") {
-			extractedDir := filepath.Join(modelsDir, entry.Name())
-			if extractedDir != destDir {
-				os.RemoveAll(destDir)
-				if err := os.Rename(extractedDir, destDir); err != nil {
-					return "", fmt.Errorf("rename %s to %s: %w", extractedDir, destDir, err)
-				}
+		if !entry.IsDir() {
+			continue
+		}
+		extractedDir := filepath.Join(modelsDir, entry.Name())
+		// Match if the directory name contains the registry name (e.g., "pyannote-segmentation-3-0")
+		// and is not already the dest directory
+		if extractedDir != destDir && strings.Contains(entry.Name(), name) {
+			os.RemoveAll(destDir)
+			if err := os.Rename(extractedDir, destDir); err != nil {
+				return "", fmt.Errorf("rename %s to %s: %w", extractedDir, destDir, err)
 			}
 			break
 		}
