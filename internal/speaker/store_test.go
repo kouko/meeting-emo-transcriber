@@ -72,14 +72,12 @@ func TestStore_LoadProfiles_WithProfile(t *testing.T) {
 	os.MkdirAll(speakerDir, 0755)
 
 	profile := types.SpeakerProfile{
-		Name: "Alice",
-		Dim:  512,
 		Embeddings: []types.SampleEmbedding{
-			{File: "test.wav", Hash: "sha256:abc", Embedding: []float32{1, 0, 0}},
+			{Source: "test.wav", Embedding: []float32{1, 0, 0}},
 		},
 	}
 	data, _ := json.MarshalIndent(profile, "", "  ")
-	os.WriteFile(filepath.Join(speakerDir, ".profile.json"), data, 0644)
+	os.WriteFile(filepath.Join(speakerDir, "test.profile.json"), data, 0644)
 
 	store := NewStore(dir, supportedExtensions())
 	profiles, err := store.LoadProfiles()
@@ -98,20 +96,24 @@ func TestStore_SaveProfile(t *testing.T) {
 	dir := t.TempDir()
 	store := NewStore(dir, supportedExtensions())
 
-	profile := types.SpeakerProfile{Name: "Bob", Dim: 512}
-	err := store.SaveProfile(profile)
+	profile := types.SpeakerProfile{
+		Embeddings: []types.SampleEmbedding{
+			{Source: "test.wav", Embedding: []float32{1, 0, 0}},
+		},
+	}
+	err := store.SaveProfile("Bob", "test.profile.json", profile)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	data, err := os.ReadFile(filepath.Join(dir, "Bob", ".profile.json"))
+	data, err := os.ReadFile(filepath.Join(dir, "Bob", "test.profile.json"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	var loaded types.SpeakerProfile
 	json.Unmarshal(data, &loaded)
-	if loaded.Name != "Bob" {
-		t.Errorf("expected Bob, got %q", loaded.Name)
+	if len(loaded.Embeddings) != 1 {
+		t.Errorf("expected 1 embedding, got %d", len(loaded.Embeddings))
 	}
 }
 
@@ -155,23 +157,23 @@ func TestStore_FileHash_Deterministic(t *testing.T) {
 	}
 }
 
-func TestStore_NeedsUpdate_NoProfile(t *testing.T) {
+func TestStore_FindNewAudioFiles_NoProfile(t *testing.T) {
 	dir := t.TempDir()
 	speakerDir := filepath.Join(dir, "Alice")
 	os.MkdirAll(speakerDir, 0755)
 	os.WriteFile(filepath.Join(speakerDir, "sample.wav"), []byte("data"), 0644)
 
 	store := NewStore(dir, supportedExtensions())
-	needs, err := store.NeedsUpdate("Alice")
+	newFiles, err := store.FindNewAudioFiles("Alice")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !needs {
-		t.Error("expected NeedsUpdate=true when no .profile.json")
+	if len(newFiles) != 1 {
+		t.Errorf("expected 1 new audio file when no profile, got %d", len(newFiles))
 	}
 }
 
-func TestStore_NeedsUpdate_Unchanged(t *testing.T) {
+func TestStore_FindNewAudioFiles_AllKnown(t *testing.T) {
 	dir := t.TempDir()
 	speakerDir := filepath.Join(dir, "Alice")
 	os.MkdirAll(speakerDir, 0755)
@@ -181,21 +183,21 @@ func TestStore_NeedsUpdate_Unchanged(t *testing.T) {
 
 	hash, _ := FileHash(audioPath)
 	profile := types.SpeakerProfile{
-		Name: "Alice",
+		KnownAudioHashes: []string{hash},
 		Embeddings: []types.SampleEmbedding{
-			{File: "sample.wav", Hash: hash, Embedding: []float32{1, 0, 0}},
+			{Source: "sample.wav", Embedding: []float32{1, 0, 0}},
 		},
 	}
 	data, _ := json.MarshalIndent(profile, "", "  ")
-	os.WriteFile(filepath.Join(speakerDir, ".profile.json"), data, 0644)
+	os.WriteFile(filepath.Join(speakerDir, "test.profile.json"), data, 0644)
 
 	store := NewStore(dir, supportedExtensions())
-	needs, err := store.NeedsUpdate("Alice")
+	newFiles, err := store.FindNewAudioFiles("Alice")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if needs {
-		t.Error("expected NeedsUpdate=false when unchanged")
+	if len(newFiles) != 0 {
+		t.Errorf("expected 0 new audio files when all known, got %d: %v", len(newFiles), newFiles)
 	}
 }
 
