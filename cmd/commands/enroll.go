@@ -31,26 +31,22 @@ func newEnrollCmd() *cobra.Command {
 				return fmt.Errorf("extract binaries: %w", err)
 			}
 
-			// Batch extract function (model loaded once per speaker)
-			batchExtractFn := func(wavPaths []string) ([][]float32, error) {
-				results, err := diarize.ExtractVoiceprints(bins.Diarize, wavPaths)
+			// Extract voiceprint from concatenated wav
+			extractFn := func(wavPath string) ([]float32, error) {
+				result, err := diarize.ExtractVoiceprint(bins.Diarize, wavPath)
 				if err != nil {
 					return nil, err
 				}
-				out := make([][]float32, len(results))
-				for i, r := range results {
-					emb := make([]float32, len(r.Vector))
-					for j, v := range r.Vector {
-						emb[j] = float32(v)
-					}
-					out[i] = emb
+				emb := make([]float32, len(result.Vector))
+				for i, v := range result.Vector {
+					emb[i] = float32(v)
 				}
-				return out, nil
+				return emb, nil
 			}
 
 			fmt.Printf("Scanning %s/...\n", speakersDir)
 
-			enrolled, err := speaker.AutoEnroll(store, bins.FFmpeg, batchExtractFn, force)
+			enrolled, err := speaker.AutoEnroll(store, bins.FFmpeg, extractFn, force)
 			if err != nil {
 				return fmt.Errorf("enroll: %w", err)
 			}

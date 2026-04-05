@@ -124,3 +124,37 @@ func copyFile(src, dst string) error {
 	}
 	return out.Sync()
 }
+
+// ConcatWAVs concatenates multiple WAV files into one using ffmpeg.
+// All inputs are resampled to 16kHz mono to ensure compatibility.
+func ConcatWAVs(ffmpegPath string, inputs []string, outputPath string) error {
+	if len(inputs) == 0 {
+		return fmt.Errorf("no input files")
+	}
+	if len(inputs) == 1 {
+		// Single file: just convert to ensure correct format
+		return ConvertToWAV(ffmpegPath, inputs[0], outputPath)
+	}
+
+	// Build ffmpeg filter_complex concat command
+	args := []string{"-y"}
+	for _, input := range inputs {
+		args = append(args, "-i", input)
+	}
+
+	// Build filter: [0:a][1:a][2:a]concat=n=3:v=0:a=1
+	filter := ""
+	for i := range inputs {
+		filter += fmt.Sprintf("[%d:a]", i)
+	}
+	filter += fmt.Sprintf("concat=n=%d:v=0:a=1", len(inputs))
+
+	args = append(args, "-filter_complex", filter, "-acodec", "pcm_s16le", "-ar", "16000", "-ac", "1", outputPath)
+
+	cmd := exec.Command(ffmpegPath, args...)
+	cmd.Stderr = os.Stderr
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("ffmpeg concat failed: %w", err)
+	}
+	return nil
+}

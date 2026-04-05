@@ -1,17 +1,26 @@
 package speaker
 
 import (
+	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/kouko/meeting-emo-transcriber/internal/types"
 )
+
+func shortUUID() string {
+	b := make([]byte, 4)
+	rand.Read(b)
+	return fmt.Sprintf("%x", b)
+}
 
 // Store manages the folder-driven speaker voiceprint store.
 type Store struct {
@@ -129,6 +138,97 @@ func (s *Store) LoadProfile(name string) (*types.SpeakerProfile, error) {
 		return nil, nil
 	}
 	return merged, nil
+}
+
+// MergeProfileFiles merges multiple *.profile.json into one file.
+// Returns the path to the merged file, or "" if 0-1 files exist.
+func (s *Store) MergeProfileFiles(name string) (string, error) {
+	speakerDir := filepath.Join(s.root, name)
+	entries, err := os.ReadDir(speakerDir)
+	if err != nil {
+		return "", err
+	}
+
+	var profileFiles []string
+	for _, e := range entries {
+		if !e.IsDir() && strings.HasSuffix(e.Name(), ".profile.json") {
+			profileFiles = append(profileFiles, e.Name())
+		}
+	}
+
+	if len(profileFiles) <= 1 {
+		if len(profileFiles) == 1 {
+			return filepath.Join(speakerDir, profileFiles[0]), nil
+		}
+		return "", nil
+	}
+
+	// Merge all profiles
+	merged := types.SpeakerProfile{Name: name}
+	hashSet := make(map[string]bool)
+
+	for _, fname := range profileFiles {
+		data, err := os.ReadFile(filepath.Join(speakerDir, fname))
+		if err != nil {
+			return "", err
+		}
+		var p types.SpeakerProfile
+		if err := json.Unmarshal(data, &p); err != nil {
+			return "", err
+		}
+		merged.Voiceprints = append(merged.Voiceprints, p.Voiceprints...)
+		for _, h := range p.KnownAudioHashes {
+			hashSet[h] = true
+		}
+		if merged.CreatedAt == "" || (p.CreatedAt != "" && p.CreatedAt < merged.CreatedAt) {
+			merged.CreatedAt = p.CreatedAt
+		}
+		if p.UpdatedAt > merged.UpdatedAt {
+			merged.UpdatedAt = p.UpdatedAt
+		}
+	}
+
+	for h := range hashSet {
+		merged.KnownAudioHashes = append(merged.KnownAudioHashes, h)
+	}
+
+	// Write merged file with new UUID name
+	uuid := shortUUID()
+	now := time.Now()
+	merged.UpdatedAt = now.Format(time.RFC3339)
+	newFilename := fmt.Sprintf("%s-%s.profile.json", now.Format("20060102"), uuid)
+	newPath := filepath.Join(speakerDir, newFilename)
+
+	data, err := json.MarshalIndent(merged, "", "  ")
+	if err != nil {
+		return "", err
+	}
+	if err := os.WriteFile(newPath, data, 0644); err != nil {
+		return "", err
+	}
+
+	// Delete old files
+	for _, fname := range profileFiles {
+		os.Remove(filepath.Join(speakerDir, fname))
+	}
+
+	return newPath, nil
+}
+
+// GetSingleProfilePath returns the path to the single profile file for a speaker.
+// Returns "" if no profile exists.
+func (s *Store) GetSingleProfilePath(name string) string {
+	speakerDir := filepath.Join(s.root, name)
+	entries, err := os.ReadDir(speakerDir)
+	if err != nil {
+		return ""
+	}
+	for _, e := range entries {
+		if !e.IsDir() && strings.HasSuffix(e.Name(), ".profile.json") {
+			return filepath.Join(speakerDir, e.Name())
+		}
+	}
+	return ""
 }
 
 // SaveProfile writes a profile to a named file in the speaker's directory.

@@ -121,23 +121,19 @@ func newTranscribeCmd() *cobra.Command {
 			fmt.Fprintf(os.Stderr, "  --match-threshold=%.2f (higher=stricter matching, lower=more lenient)\n", matchThreshold)
 			store := speaker.NewStore(speakersDir, config.SupportedAudioExtensions())
 
-			// Auto-enroll: batch extract embeddings using FluidAudio WeSpeaker (model loaded once)
-			batchExtractFn := func(wavPaths []string) ([][]float32, error) {
-				results, err := diarize.ExtractVoiceprints(bins.Diarize, wavPaths)
+			// Auto-enroll: extract voiceprint from concatenated wav
+			extractFn := func(wavPath string) ([]float32, error) {
+				result, err := diarize.ExtractVoiceprint(bins.Diarize, wavPath)
 				if err != nil {
 					return nil, err
 				}
-				out := make([][]float32, len(results))
-				for i, r := range results {
-					emb := make([]float32, len(r.Vector))
-					for j, v := range r.Vector {
-						emb[j] = float32(v)
-					}
-					out[i] = emb
+				emb := make([]float32, len(result.Vector))
+				for i, v := range result.Vector {
+					emb[i] = float32(v)
 				}
-				return out, nil
+				return emb, nil
 			}
-			if enrolled, err := speaker.AutoEnroll(store, bins.FFmpeg, batchExtractFn); err != nil {
+			if enrolled, err := speaker.AutoEnroll(store, bins.FFmpeg, extractFn); err != nil {
 				return fmt.Errorf("auto-enroll: %w", err)
 			} else if enrolled > 0 {
 				fmt.Fprintf(os.Stderr, "  Auto-enrolled %d speaker(s)\n", enrolled)
