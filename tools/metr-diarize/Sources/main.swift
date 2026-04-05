@@ -47,12 +47,16 @@ struct MetrDiarize {
         do {
             let (diarizer, _) = try await loadDiarizer(threshold: threshold, numSpeakers: numSpeakers)
 
-            log("Running diarization...")
+            let speakersDesc = numSpeakers > 0 ? "\(numSpeakers)" : "auto"
+            log("Running diarization (threshold=\(String(format: "%.2f", threshold)), num_speakers=\(speakersDesc))...")
             let url = URL(fileURLWithPath: audioPath)
             let result = try await diarizer.process(url)
 
             let speakerCount = Set(result.segments.map { $0.speakerId }).count
             log("Diarization complete: \(result.segments.count) segments, \(speakerCount) speakers")
+
+            // Per-speaker clustering stats
+            printClusteringStats(result: result)
 
             // Build segments output
             let segments = result.segments.map { seg -> [String: Any] in
@@ -151,6 +155,77 @@ struct MetrDiarize {
         let diarizer = OfflineDiarizerManager(config: config)
         diarizer.initialize(models: models)
         return (diarizer, models)
+    }
+
+    // MARK: - Clustering Stats
+
+    static func printClusteringStats(result: DiarizationResult) {
+        // Group segments by speaker
+        var speakerSegments: [String: (count: Int, duration: Float, totalQuality: Float)] = [:]
+        for seg in result.segments {
+            var stats = speakerSegments[seg.speakerId] ?? (0, 0, 0)
+            stats.count += 1
+            stats.duration += seg.durationSeconds
+            stats.totalQuality += seg.qualityScore
+            speakerSegments[seg.speakerId] = stats
+        }
+
+        let sortedSpeakers = speakerSegments.sorted { $0.value.duration > $1.value.duration }
+
+        log("")
+        log("Clustering summary:")
+        for (speakerId, stats) in sortedSpeakers {
+            let avgQuality = stats.count > 0 ? stats.totalQuality / Float(stats.count) : 0
+            let durMin = String(format: "%.1f", stats.duration / 60)
+            let qual = String(format: "%.2f", avgQuality)
+            log("  \(speakerId): \(stats.count) segments, \(durMin) min (avg quality: \(qual))")
+        }
+
+        // Inter-cluster centroid similarity
+        if let db = result.speakerDatabase, db.count > 1 {
+            log("")
+            log("Inter-cluster centroid similarity:")
+            let speakerIds = db.keys.sorted()
+            var closestPair: (String, String, Float) = ("", "", -1)
+
+            for i in 0..<speakerIds.count {
+                for j in (i+1)..<speakerIds.count {
+                    let s1 = speakerIds[i], s2 = speakerIds[j]
+                    if let e1 = db[s1], let e2 = db[s2] {
+                        let sim = cosineSimilarity(e1, e2)
+                        let simStr = String(format: "%.2f", sim)
+                        log("  \(s1) vs \(s2): \(simStr)")
+                        if sim > closestPair.2 {
+                            closestPair = (s1, s2, sim)
+                        }
+                    }
+                }
+            }
+            if closestPair.2 > 0 {
+                let simStr = String(format: "%.2f", closestPair.2)
+                log("  (closest pair: \(closestPair.0) vs \(closestPair.1) = \(simStr))")
+            }
+        }
+
+        // Timing
+        if let timings = result.timings {
+            let seg = String(format: "%.1f", timings.segmentationSeconds)
+            let emb = String(format: "%.1f", timings.embeddingExtractionSeconds)
+            let cls = String(format: "%.1f", timings.speakerClusteringSeconds)
+            let tot = String(format: "%.1f", timings.totalProcessingSeconds)
+            log("\nTiming: segmentation=\(seg)s, embedding=\(emb)s, clustering=\(cls)s, total=\(tot)s")
+        }
+    }
+
+    static func cosineSimilarity(_ a: [Float], _ b: [Float]) -> Float {
+        var dot: Float = 0, normA: Float = 0, normB: Float = 0
+        for i in 0..<min(a.count, b.count) {
+            dot += a[i] * b[i]
+            normA += a[i] * a[i]
+            normB += b[i] * b[i]
+        }
+        let denom = sqrt(normA) * sqrt(normB)
+        return denom > 0 ? dot / denom : 0
     }
 
     // MARK: - Helpers
