@@ -228,7 +228,7 @@ func newTranscribeCmd() *cobra.Command {
 	cmd.Flags().StringVar(&outputPath, "output", "", "output file path")
 	cmd.Flags().StringVar(&format, "format", "txt", "output format: txt|json|srt|all (comma-separated)")
 	cmd.Flags().StringVar(&language, "language", "auto", "language: auto|zh-TW|zh|en|ja")
-	cmd.Flags().Float32Var(&threshold, "threshold", 0.5, "diarization clustering threshold (higher = fewer speakers)")
+	cmd.Flags().Float32Var(&threshold, "threshold", 0.6, "diarization clustering threshold (higher = more speakers)")
 	cmd.Flags().IntVar(&numSpeakers, "num-speakers", 0, "expected number of speakers (0 = auto-detect)")
 	cmd.MarkFlagRequired("input")
 	return cmd
