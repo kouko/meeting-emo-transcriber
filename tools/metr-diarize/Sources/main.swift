@@ -2,6 +2,10 @@ import CoreML
 import FluidAudio
 import Foundation
 
+// Voiceprint metadata constants (must match Go types.VoiceprintModel / VoiceprintProjection)
+let voiceprintModel = "fluidaudio_embedding_v1"
+let voiceprintProjection = "none"
+
 @main
 struct MetrDiarize {
     static func main() async {
@@ -100,8 +104,8 @@ struct MetrDiarize {
                         "file": audioPath,
                         "vector": [] as [Double],
                         "dim": 0,
-                        "model": "wespeaker_v2",
-                        "projection": "none",
+                        "model": voiceprintModel,
+                        "projection": voiceprintProjection,
                     ])
                     continue
                 }
@@ -111,8 +115,8 @@ struct MetrDiarize {
                     "file": audioPath,
                     "vector": embedding,
                     "dim": embedding.count,
-                    "model": "wespeaker_v2",
-                    "projection": "none",
+                    "model": voiceprintModel,
+                    "projection": voiceprintProjection,
                 ])
             }
 

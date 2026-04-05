@@ -90,8 +90,8 @@ func AutoEnroll(store *Store, ffmpegPath string, batchExtractFn BatchVoiceprintF
 				Source:     filepath.Base(file),
 				CreatedAt:  now.Format(time.RFC3339),
 				Dim:        dim,
-				Model:      "wespeaker_v2",
-				Projection: "none",
+				Model:      types.VoiceprintModel,
+				Projection: types.VoiceprintProjection,
 				Type:       "extracted",
 				Vector:     embResults[i],
 			})

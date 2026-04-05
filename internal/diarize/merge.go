@@ -271,8 +271,8 @@ func persistUnknownSpeaker(store *speaker.Store, name, clusterID string, diarRes
 			Source:     "auto-discover",
 			CreatedAt:  now.Format(time.RFC3339),
 			Dim:        len(centroid),
-			Model:      "wespeaker_v2",
-			Projection: "none",
+			Model:      types.VoiceprintModel,
+			Projection: types.VoiceprintProjection,
 			Type:       "centroid",
 			Vector:     float64sToFloat32s(centroid),
 		})

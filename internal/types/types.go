@@ -47,15 +47,21 @@ type SpeakerProfile struct {
 	Voiceprints      []Voiceprint `json:"voiceprints"`        // one or more voiceprints from different sources
 }
 
+// Voiceprint model constants
+const (
+	VoiceprintModel      = "fluidaudio_embedding_v1"
+	VoiceprintProjection = "none"
+)
+
 // Voiceprint is a speaker identity vector with its provenance metadata.
 type Voiceprint struct {
 	Source     string    `json:"source"`     // source audio file name
 	CreatedAt  string   `json:"created_at"` // when this voiceprint was computed
-	Dim        int      `json:"dim"`        // vector dimension (128 for PLDA rho)
-	Model      string   `json:"model"`      // embedding model (e.g., "wespeaker_v2")
-	Projection string   `json:"projection"` // projection method (e.g., "plda_pyannote_community_1")
+	Dim        int      `json:"dim"`        // vector dimension (256 for WeSpeaker)
+	Model      string   `json:"model"`      // embedding model
+	Projection string   `json:"projection"` // projection method
 	Type       string   `json:"type"`       // "centroid" (from diarization) or "extracted" (from single wav)
-	Vector     []float32 `json:"vector"`    // the voiceprint vector (PLDA rho space)
+	Vector     []float32 `json:"vector"`    // the voiceprint vector
 }
 
 type MatchResult struct {
