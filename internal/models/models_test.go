@@ -86,6 +86,23 @@ func TestRegistryContainsEmotionModel(t *testing.T) {
 	}
 }
 
+func TestRegistryContainsDiarizeModels(t *testing.T) {
+	for _, name := range []string{"pyannote-segmentation-3-0", "eres2net-embedding"} {
+		t.Run(name, func(t *testing.T) {
+			info, ok := Registry[name]
+			if !ok {
+				t.Fatalf("Registry missing %q", name)
+			}
+			if info.Category != "diarize" {
+				t.Errorf("Category = %q, want \"diarize\"", info.Category)
+			}
+			if info.URL == "" {
+				t.Error("URL is empty")
+			}
+		})
+	}
+}
+
 func TestModelFilename(t *testing.T) {
 	tests := []struct {
 		name, url, expected string

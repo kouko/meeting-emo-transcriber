@@ -64,6 +64,21 @@ var Registry = map[string]ModelInfo{
 		Category:  "emotion",
 		IsArchive: true,
 	},
+	"pyannote-segmentation-3-0": {
+		Name:      "pyannote-segmentation-3-0",
+		URL:       "https://github.com/k2-fsa/sherpa-onnx/releases/download/speaker-segmentation-models/sherpa-onnx-pyannote-segmentation-3-0.tar.bz2",
+		SHA256:    "",
+		Size:      5000000,
+		Category:  "diarize",
+		IsArchive: true,
+	},
+	"eres2net-embedding": {
+		Name:     "eres2net-embedding",
+		URL:      "https://github.com/k2-fsa/sherpa-onnx/releases/download/speaker-recongition-models/3dspeaker_speech_eres2net_base_sv_zh-cn_3dspeaker_16k.onnx",
+		SHA256:   "",
+		Size:     50000000,
+		Category: "diarize",
+	},
 }
 
 // ResolveASRModel returns the model name for a given language.
