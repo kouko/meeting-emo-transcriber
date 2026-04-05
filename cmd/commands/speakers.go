@@ -5,10 +5,10 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/kouko/meeting-emo-transcriber/embedded"
 	"github.com/kouko/meeting-emo-transcriber/internal/audio"
 	"github.com/kouko/meeting-emo-transcriber/internal/config"
-	"github.com/kouko/meeting-emo-transcriber/embedded"
-	"github.com/kouko/meeting-emo-transcriber/internal/models"
+	"github.com/kouko/meeting-emo-transcriber/internal/diarize"
 	"github.com/kouko/meeting-emo-transcriber/internal/speaker"
 	"github.com/kouko/meeting-emo-transcriber/internal/types"
 	"github.com/spf13/cobra"
@@ -80,17 +80,7 @@ func newSpeakersVerifyCmd() *cobra.Command {
 				return fmt.Errorf("extract binaries: %w", err)
 			}
 
-			speakerModelPath, err := models.EnsureModel("campplus-sv-zh-cn")
-			if err != nil {
-				return fmt.Errorf("ensure speaker model: %w", err)
-			}
-
-			extractor, err := speaker.NewExtractor(speakerModelPath, cfg.Threads)
-			if err != nil {
-				return fmt.Errorf("create extractor: %w", err)
-			}
-			defer extractor.Close()
-
+			// Convert test audio to WAV
 			tmpDir, err := os.MkdirTemp("", "met-verify-*")
 			if err != nil {
 				return fmt.Errorf("create temp dir: %w", err)
@@ -102,16 +92,18 @@ func newSpeakersVerifyCmd() *cobra.Command {
 				return fmt.Errorf("convert audio: %w", err)
 			}
 
-			samples, sampleRate, err := audio.ReadWAV(tempWav)
-			if err != nil {
-				return fmt.Errorf("read audio: %w", err)
-			}
-
-			testEmb, err := extractor.Extract(samples, sampleRate)
+			// Extract embedding via FluidAudio WeSpeaker (256-dim)
+			embResult, err := diarize.ExtractEmbedding(bins.Diarize, tempWav)
 			if err != nil {
 				return fmt.Errorf("extract embedding: %w", err)
 			}
 
+			testEmb := make([]float32, len(embResult.Embedding))
+			for i, v := range embResult.Embedding {
+				testEmb[i] = float32(v)
+			}
+
+			// Match against enrolled profile
 			matcher := speaker.NewMatcher(&speaker.MaxSimilarityStrategy{})
 			result := matcher.Match(testEmb, []types.SpeakerProfile{*profile}, float32(cfg.Threshold))
 

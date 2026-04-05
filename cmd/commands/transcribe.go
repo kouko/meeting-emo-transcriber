@@ -93,9 +93,9 @@ func newTranscribeCmd() *cobra.Command {
 				return fmt.Errorf("transcribe: %w", err)
 			}
 
-			// 8. Run diarization (FluidAudio subprocess)
+			// 8. Run diarization (FluidAudio subprocess, includes speaker embeddings)
 			fmt.Fprintf(os.Stderr, "[6/8] Running speaker diarization...\n")
-			diarSegments, err := diarize.Process(bins.Diarize, tempWavPath, threshold, numSpeakers)
+			diarResult, err := diarize.Process(bins.Diarize, tempWavPath, threshold, numSpeakers)
 			if err != nil {
 				return fmt.Errorf("diarization: %w", err)
 			}
@@ -107,24 +107,25 @@ func newTranscribeCmd() *cobra.Command {
 			}
 
 			// 10. Assign speakers to ASR segments
-			speakerIDs := diarize.AssignSpeakers(results, diarSegments)
+			speakerIDs := diarize.AssignSpeakers(results, diarResult.Segments)
 
-			// 12. Resolve speaker names
+			// 11. Resolve speaker names (WeSpeaker 256-dim centroid embeddings)
 			fmt.Fprintf(os.Stderr, "[7/8] Resolving speaker identities...\n")
-			speakerModelPath, err := models.EnsureModel("campplus-sv-zh-cn")
-			if err != nil {
-				return fmt.Errorf("ensure speaker model: %w", err)
-			}
-			extractor, err := speaker.NewExtractor(speakerModelPath, cfg.Threads)
-			if err != nil {
-				return fmt.Errorf("init speaker extractor: %w", err)
-			}
-			defer extractor.Close()
-
 			store := speaker.NewStore(speakersDir, config.SupportedAudioExtensions())
 
-			// Auto-enroll: recompute embeddings for speakers with changed audio files
-			if enrolled, err := speaker.AutoEnroll(store, extractor, bins.FFmpeg); err != nil {
+			// Auto-enroll: recompute embeddings using FluidAudio WeSpeaker
+			extractFn := func(wavPath string) ([]float32, error) {
+				result, err := diarize.ExtractEmbedding(bins.Diarize, wavPath)
+				if err != nil {
+					return nil, err
+				}
+				emb := make([]float32, len(result.Embedding))
+				for i, v := range result.Embedding {
+					emb[i] = float32(v)
+				}
+				return emb, nil
+			}
+			if enrolled, err := speaker.AutoEnroll(store, bins.FFmpeg, extractFn); err != nil {
 				return fmt.Errorf("auto-enroll: %w", err)
 			} else if enrolled > 0 {
 				fmt.Fprintf(os.Stderr, "  Auto-enrolled %d speaker(s)\n", enrolled)
@@ -134,11 +135,10 @@ func newTranscribeCmd() *cobra.Command {
 			if err != nil {
 				return fmt.Errorf("load speaker profiles: %w", err)
 			}
-			matcher := speaker.NewMatcher(&speaker.MaxSimilarityStrategy{})
 
 			speakerNames, err := diarize.ResolveSpeakerNames(
-				speakerIDs, diarSegments, wavSamples, wavSampleRate,
-				extractor, profiles, matcher, float32(cfg.Threshold), store,
+				speakerIDs, diarResult, wavSamples, wavSampleRate,
+				profiles, float32(cfg.Threshold), store, bins.Diarize,
 			)
 			if err != nil {
 				return fmt.Errorf("resolve speaker names: %w", err)

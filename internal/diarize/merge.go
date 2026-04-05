@@ -41,22 +41,19 @@ func overlapDuration(s1, e1, s2, e2 float64) float64 {
 	return 0
 }
 
-// ResolveSpeakerNames maps diarization speaker IDs to enrolled speaker names.
-// For each unique cluster, extracts representative audio, computes embedding,
-// and matches against enrolled profiles.
-// Unmatched clusters get "speaker_N" names and auto-create directories.
+// ResolveSpeakerNames maps diarization speaker IDs to enrolled speaker names
+// using WeSpeaker centroid embeddings from the diarization result.
 func ResolveSpeakerNames(
 	speakerIDs []string,
-	diarSegments []Segment,
+	diarResult *DiarizeResult,
 	wavSamples []float32,
 	sampleRate int,
-	extractor *speaker.Extractor,
 	profiles []types.SpeakerProfile,
-	matcher *speaker.Matcher,
 	threshold float32,
 	store *speaker.Store,
+	diarizeBinPath string,
 ) ([]string, error) {
-	// Find unique speaker IDs
+	// Find unique cluster IDs
 	clusterSet := make(map[string]bool)
 	for _, id := range speakerIDs {
 		if id != "" {
@@ -64,40 +61,27 @@ func ResolveSpeakerNames(
 		}
 	}
 
-	// For each cluster, find the longest segment as representative
 	clusterNames := make(map[string]string)
 	nextUnknownID := scanMaxSpeakerID(store.Root()) + 1
 
 	for clusterID := range clusterSet {
-		var bestSeg Segment
-		var bestLen float64
-		for _, seg := range diarSegments {
-			if seg.Speaker == clusterID {
-				segLen := seg.End - seg.Start
-				if segLen > bestLen {
-					bestLen = segLen
-					bestSeg = seg
-				}
-			}
-		}
-
-		segAudio := audio.ExtractSegment(wavSamples, sampleRate, bestSeg.Start, bestSeg.End)
-
 		name := ""
-		if len(segAudio) > 0 && extractor != nil && len(profiles) > 0 {
-			emb, err := extractor.Extract(segAudio, sampleRate)
-			if err == nil {
-				result := matcher.Match(emb, profiles, threshold)
-				if result.Name != "" {
-					name = result.Name
-				}
+
+		// Try matching via centroid embedding from diarization
+		if len(profiles) > 0 {
+			if centroid, ok := diarResult.SpeakerEmbeddings[clusterID]; ok && len(centroid) > 0 {
+				centroidF32 := float64sToFloat32s(centroid)
+				name = matchAgainstProfiles(centroidF32, profiles, threshold)
 			}
 		}
 
 		if name == "" {
+			// Unmatched → create speaker_N
 			name = fmt.Sprintf("speaker_%d", nextUnknownID)
 			nextUnknownID++
-			persistUnknownSpeaker(store, name, segAudio, sampleRate, extractor)
+
+			// Persist: save representative audio + embedding
+			persistUnknownSpeaker(store, name, clusterID, diarResult, wavSamples, sampleRate)
 		}
 
 		clusterNames[clusterID] = name
@@ -115,22 +99,67 @@ func ResolveSpeakerNames(
 	return result, nil
 }
 
-func persistUnknownSpeaker(store *speaker.Store, name string, segAudio []float32, sampleRate int, extractor *speaker.Extractor) {
+// matchAgainstProfiles compares an embedding against all enrolled profiles.
+// Returns the best matching speaker name, or "" if no match above threshold.
+func matchAgainstProfiles(embedding []float32, profiles []types.SpeakerProfile, threshold float32) string {
+	var bestName string
+	var bestSim float32 = -1
+
+	for _, profile := range profiles {
+		for _, sample := range profile.Embeddings {
+			if len(sample.Embedding) != len(embedding) {
+				continue // dimension mismatch (old profile)
+			}
+			sim := speaker.CosineSimilarity(embedding, sample.Embedding)
+			if sim > bestSim {
+				bestSim = sim
+				bestName = profile.Name
+			}
+		}
+	}
+
+	if bestSim < threshold {
+		return ""
+	}
+	return bestName
+}
+
+func float64sToFloat32s(in64 []float64) []float32 {
+	out := make([]float32, len(in64))
+	for i, v := range in64 {
+		out[i] = float32(v)
+	}
+	return out
+}
+
+func persistUnknownSpeaker(store *speaker.Store, name, clusterID string, diarResult *DiarizeResult, wavSamples []float32, sampleRate int) {
 	speakerDir := filepath.Join(store.Root(), name)
 	os.MkdirAll(speakerDir, 0755)
 
+	// Find longest segment for this speaker and save audio
+	var bestSeg Segment
+	var bestLen float64
+	for _, seg := range diarResult.Segments {
+		if seg.Speaker == clusterID {
+			segLen := seg.End - seg.Start
+			if segLen > bestLen {
+				bestLen = segLen
+				bestSeg = seg
+			}
+		}
+	}
+
+	segAudio := audio.ExtractSegment(wavSamples, sampleRate, bestSeg.Start, bestSeg.End)
 	wavPath := filepath.Join(speakerDir, "auto_sample.wav")
 	audio.WriteWAV(wavPath, segAudio, sampleRate)
 
+	// Use centroid embedding from diarization result
 	var embeddings []types.SampleEmbedding
-	if extractor != nil && len(segAudio) > 0 {
-		emb, err := extractor.Extract(segAudio, sampleRate)
-		if err == nil {
-			embeddings = append(embeddings, types.SampleEmbedding{
-				File:      "auto_sample.wav",
-				Embedding: emb,
-			})
-		}
+	if centroid, ok := diarResult.SpeakerEmbeddings[clusterID]; ok && len(centroid) > 0 {
+		embeddings = append(embeddings, types.SampleEmbedding{
+			File:      "auto_sample.wav",
+			Embedding: float64sToFloat32s(centroid),
+		})
 	}
 
 	now := time.Now().Format(time.RFC3339)
@@ -142,7 +171,7 @@ func persistUnknownSpeaker(store *speaker.Store, name string, segAudio []float32
 		Name:       name,
 		Embeddings: embeddings,
 		Dim:        dim,
-		Model:      "campplus_sv_zh-cn",
+		Model:      "wespeaker_v2",
 		CreatedAt:  now,
 		UpdatedAt:  now,
 	}

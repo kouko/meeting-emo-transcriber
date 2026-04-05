@@ -6,10 +6,10 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/kouko/meeting-emo-transcriber/embedded"
 	"github.com/kouko/meeting-emo-transcriber/internal/audio"
 	"github.com/kouko/meeting-emo-transcriber/internal/config"
-	"github.com/kouko/meeting-emo-transcriber/embedded"
-	"github.com/kouko/meeting-emo-transcriber/internal/models"
+	"github.com/kouko/meeting-emo-transcriber/internal/diarize"
 	"github.com/kouko/meeting-emo-transcriber/internal/speaker"
 	"github.com/kouko/meeting-emo-transcriber/internal/types"
 	"github.com/spf13/cobra"
@@ -35,22 +35,6 @@ func newEnrollCmd() *cobra.Command {
 			if err != nil {
 				return fmt.Errorf("extract binaries: %w", err)
 			}
-
-			speakerModelPath, err := models.EnsureModel("campplus-sv-zh-cn")
-			if err != nil {
-				return fmt.Errorf("ensure speaker model: %w", err)
-			}
-
-			cfg, err := config.Load(configPath, speakersDir)
-			if err != nil {
-				return fmt.Errorf("load config: %w", err)
-			}
-
-			extractor, err := speaker.NewExtractor(speakerModelPath, cfg.Threads)
-			if err != nil {
-				return fmt.Errorf("create extractor: %w", err)
-			}
-			defer extractor.Close()
 
 			fmt.Printf("Scanning %s/...\n", speakersDir)
 
@@ -92,16 +76,16 @@ func newEnrollCmd() *cobra.Command {
 						return fmt.Errorf("convert %s: %w", file, err)
 					}
 
-					samples, sampleRate, err := audio.ReadWAV(tempWav)
-					if err != nil {
-						os.RemoveAll(tmpDir)
-						return fmt.Errorf("read %s: %w", file, err)
-					}
-
-					emb, err := extractor.Extract(samples, sampleRate)
+					// Extract embedding via FluidAudio WeSpeaker (256-dim)
+					embResult, err := diarize.ExtractEmbedding(bins.Diarize, tempWav)
 					if err != nil {
 						os.RemoveAll(tmpDir)
 						return fmt.Errorf("extract embedding from %s: %w", file, err)
+					}
+
+					emb32 := make([]float32, len(embResult.Embedding))
+					for i, v := range embResult.Embedding {
+						emb32[i] = float32(v)
 					}
 
 					hash, err := speaker.FileHash(file)
@@ -113,7 +97,7 @@ func newEnrollCmd() *cobra.Command {
 					embeddings = append(embeddings, types.SampleEmbedding{
 						File:      filepath.Base(file),
 						Hash:      hash,
-						Embedding: emb,
+						Embedding: emb32,
 					})
 				}
 				os.RemoveAll(tmpDir)
@@ -125,11 +109,15 @@ func newEnrollCmd() *cobra.Command {
 				}
 
 				now := time.Now().Format(time.RFC3339)
+				dim := 0
+				if len(embeddings) > 0 {
+					dim = len(embeddings[0].Embedding)
+				}
 				profile := types.SpeakerProfile{
 					Name:       name,
 					Embeddings: embeddings,
-					Dim:        extractor.Dim(),
-					Model:      "campplus_sv_zh-cn",
+					Dim:        dim,
+					Model:      "wespeaker_v2",
 					CreatedAt:  now,
 					UpdatedAt:  now,
 				}

@@ -10,10 +10,14 @@ import (
 	"github.com/kouko/meeting-emo-transcriber/internal/types"
 )
 
+// EmbeddingFunc extracts a speaker embedding from a WAV file.
+// This is injected by the caller to avoid import cycles.
+type EmbeddingFunc func(wavPath string) ([]float32, error)
+
 // AutoEnroll checks all speakers in the store and recomputes embeddings
-// for any that need updating. Returns the number of speakers updated.
-// ffmpegPath is needed to convert audio files to WAV.
-func AutoEnroll(store *Store, extractor *Extractor, ffmpegPath string) (int, error) {
+// for any that need updating. Uses the provided extractFn for embedding.
+// Returns the number of speakers updated.
+func AutoEnroll(store *Store, ffmpegPath string, extractFn EmbeddingFunc) (int, error) {
 	names, err := store.List()
 	if err != nil {
 		return 0, err
@@ -52,13 +56,7 @@ func AutoEnroll(store *Store, extractor *Extractor, ffmpegPath string) (int, err
 				return updated, fmt.Errorf("convert %s: %w", file, err)
 			}
 
-			samples, sampleRate, err := audio.ReadWAV(tempWav)
-			if err != nil {
-				os.RemoveAll(tmpDir)
-				return updated, fmt.Errorf("read %s: %w", file, err)
-			}
-
-			emb, err := extractor.Extract(samples, sampleRate)
+			emb, err := extractFn(tempWav)
 			if err != nil {
 				os.RemoveAll(tmpDir)
 				return updated, fmt.Errorf("extract embedding from %s: %w", file, err)
@@ -80,11 +78,15 @@ func AutoEnroll(store *Store, extractor *Extractor, ffmpegPath string) (int, err
 
 		existing, _ := store.LoadProfile(name)
 		now := time.Now().Format(time.RFC3339)
+		dim := 0
+		if len(embeddings) > 0 {
+			dim = len(embeddings[0].Embedding)
+		}
 		profile := types.SpeakerProfile{
 			Name:       name,
 			Embeddings: embeddings,
-			Dim:        extractor.Dim(),
-			Model:      "campplus_sv_zh-cn",
+			Dim:        dim,
+			Model:      "wespeaker_v2",
 			CreatedAt:  now,
 			UpdatedAt:  now,
 		}
