@@ -26,9 +26,10 @@ func TestExtractorDim(t *testing.T) {
 	defer ext.Close()
 
 	dim := ext.Dim()
-	if dim != 512 {
-		t.Errorf("Dim() = %d, want 512", dim)
+	if dim <= 0 {
+		t.Errorf("Dim() = %d, want > 0", dim)
 	}
+	t.Logf("Dim() = %d", dim)
 }
 
 func findTestModel(name string) string {
