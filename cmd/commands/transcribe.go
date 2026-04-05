@@ -99,7 +99,9 @@ func newTranscribeCmd() *cobra.Command {
 			if numSpeakers > 0 {
 				speakersDesc = fmt.Sprintf("%d", numSpeakers)
 			}
-			fmt.Fprintf(os.Stderr, "[6/9] Running speaker diarization (threshold=%.2f, num-speakers=%s)...\n", threshold, speakersDesc)
+			fmt.Fprintf(os.Stderr, "[6/9] Running speaker diarization...\n")
+			fmt.Fprintf(os.Stderr, "  --threshold=%.2f (higher=more speakers, lower=fewer speakers)\n", threshold)
+			fmt.Fprintf(os.Stderr, "  --num-speakers=%s\n", speakersDesc)
 			diarResult, err := diarize.Process(bins.Diarize, tempWavPath, threshold, numSpeakers)
 			if err != nil {
 				return fmt.Errorf("diarization: %w", err)
@@ -115,7 +117,8 @@ func newTranscribeCmd() *cobra.Command {
 			speakerIDs := diarize.AssignSpeakers(results, diarResult.Segments)
 
 			// 11. Resolve speaker names (WeSpeaker 256-dim centroid embeddings)
-			fmt.Fprintf(os.Stderr, "[7/9] Resolving speaker identities (match-threshold=%.2f)...\n", matchThreshold)
+			fmt.Fprintf(os.Stderr, "[7/9] Resolving speaker identities...\n")
+			fmt.Fprintf(os.Stderr, "  --match-threshold=%.2f (higher=stricter matching, lower=more lenient)\n", matchThreshold)
 			store := speaker.NewStore(speakersDir, config.SupportedAudioExtensions())
 
 			// Auto-enroll: batch extract embeddings using FluidAudio WeSpeaker (model loaded once)
