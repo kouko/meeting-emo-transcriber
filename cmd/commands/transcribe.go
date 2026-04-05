@@ -3,6 +3,7 @@ package commands
 import (
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
@@ -30,6 +31,7 @@ func newTranscribeCmd() *cobra.Command {
 		matchThreshold float32
 		numSpeakers    int
 		learn          bool
+		enhance        bool
 	)
 	cmd := &cobra.Command{
 		Use:   "transcribe",
@@ -79,6 +81,19 @@ func newTranscribeCmd() *cobra.Command {
 			tempWavPath := filepath.Join(tmpDir, "audio.wav")
 			if err := audio.ConvertToWAV(bins.FFmpeg, inputPath, tempWavPath); err != nil {
 				return fmt.Errorf("convert to WAV: %w", err)
+			}
+
+			// Optional: enhance audio with DeepFilterNet3
+			if enhance {
+				fmt.Fprintf(os.Stderr, "[*] Enhancing audio (DeepFilterNet3)...\n")
+				enhancedPath := filepath.Join(tmpDir, "enhanced.wav")
+				cmd := exec.Command(bins.Denoise, tempWavPath, enhancedPath)
+				cmd.Stderr = os.Stderr
+				if err := cmd.Run(); err != nil {
+					return fmt.Errorf("enhance audio: %w", err)
+				}
+				// Use enhanced audio for subsequent steps
+				tempWavPath = enhancedPath
 			}
 
 			// 7. Run ASR
@@ -257,6 +272,7 @@ func newTranscribeCmd() *cobra.Command {
 	cmd.Flags().Float32Var(&matchThreshold, "match-threshold", 0.55, "speaker matching threshold for enrolled profiles")
 	cmd.Flags().IntVar(&numSpeakers, "num-speakers", 0, "expected number of speakers (0 = auto-detect)")
 	cmd.Flags().BoolVarP(&learn, "learning-mode", "l", false, "create folders for all clusters (including matched) for manual review")
+	cmd.Flags().BoolVar(&enhance, "enhance", false, "enhance audio with DeepFilterNet3 noise reduction before processing")
 	cmd.MarkFlagRequired("input")
 	return cmd
 }

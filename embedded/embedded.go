@@ -21,6 +21,7 @@ type BinPaths struct {
 	WhisperCLI string
 	FFmpeg     string
 	Diarize    string
+	Denoise    string
 }
 
 // CacheDir returns the root cache directory for extracted binaries.
@@ -47,6 +48,7 @@ func ExtractAll() (BinPaths, error) {
 		"whisper-cli":   "",
 		"ffmpeg":        "",
 		"metr-diarize":  "",
+		"metr-denoise":  "",
 	}
 
 	for name := range tools {
@@ -62,6 +64,7 @@ func ExtractAll() (BinPaths, error) {
 		WhisperCLI: tools["whisper-cli"],
 		FFmpeg:     tools["ffmpeg"],
 		Diarize:    tools["metr-diarize"],
+		Denoise:    tools["metr-denoise"],
 	}, nil
 }
 

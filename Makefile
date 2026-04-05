@@ -17,6 +17,8 @@ build-deps:
 	@bash scripts/build-whisper.sh
 	@echo "==> Building metr-diarize..."
 	@bash scripts/build-diarize.sh
+	@echo "==> Building metr-denoise..."
+	@bash scripts/build-denoise.sh
 
 download-deps:
 	@echo "==> Downloading ffmpeg..."
@@ -41,6 +43,7 @@ clean-all: clean
 	rm -rf embedded/bin/darwin-arm64/
 	rm -rf .build/
 	rm -rf tools/metr-diarize/.build/
+	rm -rf tools/metr-denoise/.build/
 
 # Show current build info
 info:

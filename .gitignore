@@ -36,6 +36,8 @@ vendor/
 .build/
 tools/metr-diarize/.build/
 tools/metr-diarize/.swiftpm/
+tools/metr-denoise/.build/
+tools/metr-denoise/.swiftpm/
 
 # Datasets (benchmark data, downloaded by FluidAudio)
 Datasets/
