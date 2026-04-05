@@ -61,11 +61,12 @@ func cacheKey(filePath string) (string, error) {
 // TranscribeWithCache checks for a cached SRT result before running whisper-cli.
 // On cache hit, returns parsed results immediately (~0s instead of ~7min).
 // On cache miss, runs whisper-cli and saves the SRT to cache.
-func TranscribeWithCache(cfg WhisperConfig, wavPath string) ([]types.ASRResult, error) {
+// originalPath is used for cache key (stable path), wavPath is the actual WAV to process.
+func TranscribeWithCache(cfg WhisperConfig, wavPath, originalPath string) ([]types.ASRResult, error) {
 	cacheDir := filepath.Join(embedded.CacheDir(), "cache")
 	os.MkdirAll(cacheDir, 0755)
 
-	key, err := cacheKey(wavPath)
+	key, err := cacheKey(originalPath)
 	if err != nil {
 		// Can't compute cache key — fall through to normal transcription
 		return Transcribe(cfg, wavPath)

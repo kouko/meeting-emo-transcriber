@@ -88,7 +88,7 @@ func newTranscribeCmd() *cobra.Command {
 				Language:     language,
 				Threads:      cfg.Threads,
 			}
-			results, err := asr.TranscribeWithCache(whisperCfg, tempWavPath)
+			results, err := asr.TranscribeWithCache(whisperCfg, tempWavPath, inputPath)
 			if err != nil {
 				return fmt.Errorf("transcribe: %w", err)
 			}
