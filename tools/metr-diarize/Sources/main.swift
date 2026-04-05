@@ -16,9 +16,11 @@ struct MetrDiarize {
         let numSpeakers = parseInt(flag: "--num-speakers", default: 0)
 
         do {
-            // 1. Load models (auto-download on first run)
-            log("Loading diarization models...")
-            let models = try await OfflineDiarizerModels.load { progress in
+            // 1. Load models (auto-download to ~/.metr/models/diarization/)
+            let modelsDir = URL(fileURLWithPath: NSHomeDirectory())
+                .appendingPathComponent(".metr/models/diarization")
+            log("Loading diarization models from \(modelsDir.path)...")
+            let models = try await OfflineDiarizerModels.load(from: modelsDir) { progress in
                 log("  Downloading models: \(String(format: "%.0f", progress.fractionCompleted * 100))%")
             }
 
