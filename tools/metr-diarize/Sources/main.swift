@@ -41,8 +41,7 @@ struct MetrDiarize {
         let numSpeakers = parseInt(flag: "--num-speakers", default: 0)
 
         do {
-            let (diarizer, models) = try await loadDiarizer(threshold: threshold, numSpeakers: numSpeakers)
-            let plda = PLDATransform(pldaRhoModel: models.pldaRhoModel, psi: models.pldaPsi)
+            let (diarizer, _) = try await loadDiarizer(threshold: threshold, numSpeakers: numSpeakers)
 
             log("Running diarization...")
             let url = URL(fileURLWithPath: audioPath)
@@ -60,12 +59,11 @@ struct MetrDiarize {
                 ]
             }
 
-            // Build speaker voiceprints (PLDA rho vectors per speaker)
+            // Build speaker voiceprints (raw 256-dim WeSpeaker centroid)
             var speakerVoiceprints: [String: [Double]] = [:]
             if let db = result.speakerDatabase {
                 for (speakerId, embedding) in db {
-                    let rho = try await plda.transform(embedding)
-                    speakerVoiceprints[speakerId] = rho
+                    speakerVoiceprints[speakerId] = embedding.map { Double($0) }
                 }
             }
 
@@ -88,8 +86,7 @@ struct MetrDiarize {
 
     static func extractVoiceprints(audioPaths: [String]) async {
         do {
-            let (diarizer, models) = try await loadDiarizer(threshold: 0.6, numSpeakers: 1)
-            let plda = PLDATransform(pldaRhoModel: models.pldaRhoModel, psi: models.pldaPsi)
+            let (diarizer, _) = try await loadDiarizer(threshold: 0.6, numSpeakers: 1)
 
             var results: [[String: Any]] = []
             for audioPath in audioPaths {
@@ -109,13 +106,13 @@ struct MetrDiarize {
                     continue
                 }
 
-                let rho = try await plda.transform(firstEntry.value)
+                let embedding = firstEntry.value.map { Double($0) }
                 results.append([
                     "file": audioPath,
-                    "vector": rho,
-                    "dim": rho.count,
+                    "vector": embedding,
+                    "dim": embedding.count,
                     "model": "wespeaker_v2",
-                    "projection": "plda_pyannote_community_1",
+                    "projection": "none",
                 ])
             }
 

@@ -91,7 +91,7 @@ func AutoEnroll(store *Store, ffmpegPath string, batchExtractFn BatchVoiceprintF
 				CreatedAt:  now.Format(time.RFC3339),
 				Dim:        dim,
 				Model:      "wespeaker_v2",
-				Projection: "plda_pyannote_community_1",
+				Projection: "none",
 				Type:       "extracted",
 				Vector:     embResults[i],
 			})

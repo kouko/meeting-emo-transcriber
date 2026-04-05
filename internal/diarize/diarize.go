@@ -20,9 +20,9 @@ type Segment struct {
 
 // DiarizeResult contains diarization segments and per-speaker voiceprints.
 type DiarizeResult struct {
-	Segments            []Segment            `json:"segments"`
-	Speakers            int                  `json:"speakers"`
-	SpeakerVoiceprints  map[string][]float64 `json:"speaker_voiceprints"`
+	Segments           []Segment            `json:"segments"`
+	Speakers           int                  `json:"speakers"`
+	SpeakerVoiceprints map[string][]float64 `json:"speaker_voiceprints"`
 }
 
 // Process runs speaker diarization on a WAV file using metr-diarize CLI.

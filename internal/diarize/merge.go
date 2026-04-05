@@ -117,9 +117,10 @@ func ResolveSpeakerNames(
 				centroidF32 := float64sToFloat32s(centroid)
 				result = matchAgainstProfilesDetailed(centroidF32, profiles, threshold)
 
-				// Print per-profile details
+				// Print per-profile PLDA similarity
 				for _, d := range result.Details {
-					fmt.Fprintf(os.Stderr, "    vs %-12s best=%.2f (%d voiceprints)\n", d.ProfileName+":", d.BestSim, d.NumVoiceprints)
+					fmt.Fprintf(os.Stderr, "    vs %-12s plda=%.2f (%d voiceprints)\n",
+						d.ProfileName+":", d.BestSim, d.NumVoiceprints)
 				}
 			} else {
 				fmt.Fprintf(os.Stderr, "    (no voiceprint available for this cluster)\n")
@@ -140,6 +141,23 @@ func ResolveSpeakerNames(
 				fmt.Fprintf(os.Stderr, "    → no match (best=%.2f < threshold=%.2f), created %s\n", result.BestSim, threshold, name)
 			} else {
 				fmt.Fprintf(os.Stderr, "    → no enrolled profiles to match, created %s\n", name)
+			}
+		}
+	}
+
+	// Print inter-cluster similarity
+	if len(clusterIDs) > 1 {
+		fmt.Fprintf(os.Stderr, "\n  Inter-cluster similarity:\n")
+		for i := 0; i < len(clusterIDs); i++ {
+			for j := i + 1; j < len(clusterIDs); j++ {
+				c1, c2 := clusterIDs[i], clusterIDs[j]
+				if v1, ok := diarResult.SpeakerVoiceprints[c1]; ok {
+					if v2, ok := diarResult.SpeakerVoiceprints[c2]; ok {
+						sim := speaker.CosineSimilarity(float64sToFloat32s(v1), float64sToFloat32s(v2))
+						n1, n2 := clusterNames[c1], clusterNames[c2]
+						fmt.Fprintf(os.Stderr, "    %s(%s) vs %s(%s): %.2f\n", c1, n1, c2, n2, sim)
+					}
+				}
 			}
 		}
 	}
@@ -254,7 +272,7 @@ func persistUnknownSpeaker(store *speaker.Store, name, clusterID string, diarRes
 			CreatedAt:  now.Format(time.RFC3339),
 			Dim:        len(centroid),
 			Model:      "wespeaker_v2",
-			Projection: "plda_pyannote_community_1",
+			Projection: "none",
 			Type:       "centroid",
 			Vector:     float64sToFloat32s(centroid),
 		})
