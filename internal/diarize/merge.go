@@ -13,12 +13,12 @@ import (
 )
 
 // AssignSpeakers maps each ASR result to a diarization speaker by maximum time overlap.
-// Returns a slice of speaker IDs (0-indexed) parallel to asrResults.
-// Returns -1 for segments with no diarization overlap.
-func AssignSpeakers(asrResults []types.ASRResult, diarSegments []Segment) []int {
-	ids := make([]int, len(asrResults))
+// Returns a slice of speaker ID strings parallel to asrResults.
+// Returns "" for segments with no diarization overlap.
+func AssignSpeakers(asrResults []types.ASRResult, diarSegments []Segment) []string {
+	ids := make([]string, len(asrResults))
 	for i, asr := range asrResults {
-		bestSpeaker := -1
+		var bestSpeaker string
 		var bestOverlap float64
 		for _, seg := range diarSegments {
 			overlap := overlapDuration(asr.Start, asr.End, seg.Start, seg.End)
@@ -41,9 +41,12 @@ func overlapDuration(s1, e1, s2, e2 float64) float64 {
 	return 0
 }
 
-// ResolveSpeakerNames maps cluster IDs to human-readable names.
+// ResolveSpeakerNames maps diarization speaker IDs to enrolled speaker names.
+// For each unique cluster, extracts representative audio, computes embedding,
+// and matches against enrolled profiles.
+// Unmatched clusters get "speaker_N" names and auto-create directories.
 func ResolveSpeakerNames(
-	speakerIDs []int,
+	speakerIDs []string,
 	diarSegments []Segment,
 	wavSamples []float32,
 	sampleRate int,
@@ -53,16 +56,16 @@ func ResolveSpeakerNames(
 	threshold float32,
 	store *speaker.Store,
 ) ([]string, error) {
-	// Find unique cluster IDs
-	clusterSet := make(map[int]bool)
+	// Find unique speaker IDs
+	clusterSet := make(map[string]bool)
 	for _, id := range speakerIDs {
-		if id >= 0 {
+		if id != "" {
 			clusterSet[id] = true
 		}
 	}
 
 	// For each cluster, find the longest segment as representative
-	clusterNames := make(map[int]string)
+	clusterNames := make(map[string]string)
 	nextUnknownID := scanMaxSpeakerID(store.Root()) + 1
 
 	for clusterID := range clusterSet {
@@ -103,7 +106,7 @@ func ResolveSpeakerNames(
 	// Map IDs to names
 	result := make([]string, len(speakerIDs))
 	for i, id := range speakerIDs {
-		if id >= 0 {
+		if id != "" {
 			result[i] = clusterNames[id]
 		} else {
 			result[i] = "Unknown"
@@ -139,7 +142,7 @@ func persistUnknownSpeaker(store *speaker.Store, name string, segAudio []float32
 		Name:       name,
 		Embeddings: embeddings,
 		Dim:        dim,
-		Model:      "eres2net_base",
+		Model:      "campplus_sv_zh-cn",
 		CreatedAt:  now,
 		UpdatedAt:  now,
 	}

@@ -20,6 +20,7 @@ var binFS embed.FS
 type BinPaths struct {
 	WhisperCLI string
 	FFmpeg     string
+	Diarize    string
 }
 
 // CacheDir returns the root cache directory for extracted binaries.
@@ -43,8 +44,9 @@ func ExtractAll() (BinPaths, error) {
 
 	platform := fmt.Sprintf("%s-%s", runtime.GOOS, runtime.GOARCH)
 	tools := map[string]string{
-		"whisper-cli": "",
-		"ffmpeg":      "",
+		"whisper-cli":   "",
+		"ffmpeg":        "",
+		"metr-diarize":  "",
 	}
 
 	for name := range tools {
@@ -59,6 +61,7 @@ func ExtractAll() (BinPaths, error) {
 	return BinPaths{
 		WhisperCLI: tools["whisper-cli"],
 		FFmpeg:     tools["ffmpeg"],
+		Diarize:    tools["metr-diarize"],
 	}, nil
 }
 

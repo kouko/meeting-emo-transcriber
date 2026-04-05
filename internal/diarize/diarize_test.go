@@ -12,15 +12,16 @@ func TestAssignSpeakersExactOverlap(t *testing.T) {
 		{Start: 5.0, End: 10.0, Text: "World"},
 	}
 	diarSegments := []Segment{
-		{Start: 0.0, End: 5.0, Speaker: 0},
-		{Start: 5.0, End: 10.0, Speaker: 1},
+		{Start: 0.0, End: 5.0, Speaker: "S1"},
+		{Start: 5.0, End: 10.0, Speaker: "S2"},
 	}
+
 	ids := AssignSpeakers(asrResults, diarSegments)
-	if ids[0] != 0 {
-		t.Errorf("segment 0: got speaker %d, want 0", ids[0])
+	if ids[0] != "S1" {
+		t.Errorf("segment 0: got speaker %q, want S1", ids[0])
 	}
-	if ids[1] != 1 {
-		t.Errorf("segment 1: got speaker %d, want 1", ids[1])
+	if ids[1] != "S2" {
+		t.Errorf("segment 1: got speaker %q, want S2", ids[1])
 	}
 }
 
@@ -29,13 +30,13 @@ func TestAssignSpeakersPartialOverlap(t *testing.T) {
 		{Start: 2.0, End: 8.0, Text: "Hello"},
 	}
 	diarSegments := []Segment{
-		{Start: 0.0, End: 5.0, Speaker: 0},
-		{Start: 5.0, End: 10.0, Speaker: 1},
+		{Start: 0.0, End: 5.0, Speaker: "S1"},
+		{Start: 5.0, End: 10.0, Speaker: "S2"},
 	}
+
 	ids := AssignSpeakers(asrResults, diarSegments)
-	// Both overlap 3s — first match wins
-	if ids[0] != 0 {
-		t.Errorf("got speaker %d, want 0", ids[0])
+	if ids[0] != "S1" {
+		t.Errorf("got speaker %q, want S1", ids[0])
 	}
 }
 
@@ -44,11 +45,12 @@ func TestAssignSpeakersNoOverlap(t *testing.T) {
 		{Start: 20.0, End: 25.0, Text: "Late"},
 	}
 	diarSegments := []Segment{
-		{Start: 0.0, End: 10.0, Speaker: 0},
+		{Start: 0.0, End: 10.0, Speaker: "S1"},
 	}
+
 	ids := AssignSpeakers(asrResults, diarSegments)
-	if ids[0] != -1 {
-		t.Errorf("got speaker %d, want -1", ids[0])
+	if ids[0] != "" {
+		t.Errorf("got speaker %q, want empty", ids[0])
 	}
 }
 

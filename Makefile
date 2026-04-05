@@ -15,6 +15,8 @@ deps: build-deps download-deps
 build-deps:
 	@echo "==> Building whisper-cli..."
 	@bash scripts/build-whisper.sh
+	@echo "==> Building metr-diarize..."
+	@bash scripts/build-diarize.sh
 
 download-deps:
 	@echo "==> Downloading ffmpeg..."
@@ -23,7 +25,7 @@ download-deps:
 # Build the Go binary
 build:
 	@echo "==> Building $(BINARY_NAME) $(VERSION) for $(GOOS)-$(GOARCH)..."
-	CGO_ENABLED=1 go build -ldflags "$(LDFLAGS)" -o $(BINARY_NAME) ./cmd/main.go
+	go build -ldflags "$(LDFLAGS)" -o $(BINARY_NAME) ./cmd/
 
 # Run tests
 test:
@@ -38,6 +40,7 @@ clean:
 clean-all: clean
 	rm -rf embedded/bin/darwin-arm64/
 	rm -rf .build/
+	rm -rf tools/metr-diarize/.build/
 
 # Show current build info
 info:

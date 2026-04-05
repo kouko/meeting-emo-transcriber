@@ -93,33 +93,20 @@ func newTranscribeCmd() *cobra.Command {
 				return fmt.Errorf("transcribe: %w", err)
 			}
 
-			// 8. Ensure diarization models
+			// 8. Run diarization (FluidAudio subprocess)
 			fmt.Fprintf(os.Stderr, "[6/8] Running speaker diarization...\n")
-			segModelDir, err := models.EnsureModel("pyannote-segmentation-3-0")
+			diarSegments, err := diarize.Process(bins.Diarize, tempWavPath, threshold, numSpeakers)
 			if err != nil {
-				return fmt.Errorf("ensure segmentation model: %w", err)
-			}
-			diarEmbModelPath, err := models.EnsureModel("campplus-sv-zh-cn")
-			if err != nil {
-				return fmt.Errorf("ensure diarization embedding model: %w", err)
+				return fmt.Errorf("diarization: %w", err)
 			}
 
-			// 9. Read full WAV
+			// 9. Read full WAV for segment extraction
 			wavSamples, wavSampleRate, err := audio.ReadWAV(tempWavPath)
 			if err != nil {
 				return fmt.Errorf("read WAV: %w", err)
 			}
 
-			// 10. Run diarization
-			diarizer, err := diarize.NewDiarizer(segModelDir, diarEmbModelPath, cfg.Threads, numSpeakers, threshold)
-			if err != nil {
-				return fmt.Errorf("init diarizer: %w", err)
-			}
-			defer diarizer.Close()
-
-			diarSegments := diarizer.Process(wavSamples)
-
-			// 11. Assign speakers to ASR segments
+			// 10. Assign speakers to ASR segments
 			speakerIDs := diarize.AssignSpeakers(results, diarSegments)
 
 			// 12. Resolve speaker names

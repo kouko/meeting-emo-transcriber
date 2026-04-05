@@ -1,81 +1,54 @@
+// Package diarize provides speaker diarization via the metr-diarize CLI tool
+// (FluidAudio-based, CoreML/ANE accelerated).
 package diarize
 
 import (
+	"bytes"
+	"encoding/json"
 	"fmt"
-	"path/filepath"
-
-	sherpa "github.com/k2-fsa/sherpa-onnx-go-macos"
+	"os"
+	"os/exec"
+	"strconv"
 )
 
 // Segment represents a speaker diarization result.
 type Segment struct {
-	Start   float64
-	End     float64
-	Speaker int // 0-indexed cluster ID
+	Start   float64 `json:"start"`
+	End     float64 `json:"end"`
+	Speaker string  `json:"speaker"`
 }
 
-// Diarizer wraps sherpa-onnx OfflineSpeakerDiarization.
-type Diarizer struct {
-	inner *sherpa.OfflineSpeakerDiarization
+// diarizeOutput is the JSON format from metr-diarize CLI.
+type diarizeOutput struct {
+	Segments []Segment `json:"segments"`
+	Speakers int       `json:"speakers"`
 }
 
-// NewDiarizer creates a diarizer.
-// segModelDir: path to directory containing pyannote model.onnx
-// embModelPath: path to speaker embedding .onnx file
-// threads: number of CPU threads to use
-// numClusters: if > 0, use fixed cluster count; otherwise use threshold
-// threshold: clustering threshold (higher = fewer clusters); ignored if numClusters > 0
-func NewDiarizer(segModelDir, embModelPath string, threads int, numClusters int, threshold float32) (*Diarizer, error) {
-	config := &sherpa.OfflineSpeakerDiarizationConfig{}
-
-	config.Segmentation.Pyannote.Model = filepath.Join(segModelDir, "model.onnx")
-	config.Segmentation.NumThreads = threads
-	config.Segmentation.Debug = 1
-	config.Segmentation.Provider = "coreml"
-
-	config.Embedding.Model = embModelPath
-	config.Embedding.NumThreads = threads
-	config.Embedding.Debug = 1
-	config.Embedding.Provider = "coreml"
-
-	if numClusters > 0 {
-		config.Clustering.NumClusters = numClusters
-	} else {
-		config.Clustering.Threshold = threshold
-	}
-
-	inner := sherpa.NewOfflineSpeakerDiarization(config)
-	if inner == nil {
-		return nil, fmt.Errorf("failed to create diarizer (check model paths: seg=%s, emb=%s)", segModelDir, embModelPath)
-	}
-
-	return &Diarizer{inner: inner}, nil
-}
-
-// Process runs diarization on audio samples (must be at SampleRate() Hz).
+// Process runs speaker diarization on a WAV file using metr-diarize CLI.
+// binPath: path to metr-diarize binary
+// wavPath: path to 16kHz mono WAV file
+// threshold: clustering threshold (higher = fewer speakers)
+// numSpeakers: if > 0, fixed speaker count; otherwise auto-detect
 // Returns segments sorted by start time.
-func (d *Diarizer) Process(samples []float32) []Segment {
-	raw := d.inner.Process(samples)
-	segments := make([]Segment, len(raw))
-	for i, r := range raw {
-		segments[i] = Segment{
-			Start:   float64(r.Start),
-			End:     float64(r.End),
-			Speaker: r.Speaker,
-		}
+func Process(binPath, wavPath string, threshold float32, numSpeakers int) ([]Segment, error) {
+	args := []string{wavPath, "--threshold", strconv.FormatFloat(float64(threshold), 'f', 2, 32)}
+	if numSpeakers > 0 {
+		args = append(args, "--num-speakers", strconv.Itoa(numSpeakers))
 	}
-	return segments
-}
 
-// SampleRate returns the expected audio sample rate (typically 16000).
-func (d *Diarizer) SampleRate() int {
-	return d.inner.SampleRate()
-}
+	cmd := exec.Command(binPath, args...)
+	var stdout bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = os.Stderr // show progress logs to user
 
-// Close releases resources.
-func (d *Diarizer) Close() {
-	if d.inner != nil {
-		sherpa.DeleteOfflineSpeakerDiarization(d.inner)
-		d.inner = nil
+	if err := cmd.Run(); err != nil {
+		return nil, fmt.Errorf("metr-diarize failed: %w", err)
 	}
+
+	var output diarizeOutput
+	if err := json.Unmarshal(stdout.Bytes(), &output); err != nil {
+		return nil, fmt.Errorf("parse diarize output: %w", err)
+	}
+
+	return output.Segments, nil
 }
