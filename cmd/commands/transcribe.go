@@ -229,7 +229,14 @@ func newTranscribeCmd() *cobra.Command {
 				if err != nil {
 					return fmt.Errorf("format %s: %w", fmt_, err)
 				}
-				if err := os.WriteFile(outPath, []byte(content), 0644); err != nil {
+				// Add UTF-8 BOM for txt/srt so macOS text editors detect encoding correctly
+				var fileContent []byte
+				if fmt_ == "txt" || fmt_ == "srt" {
+					fileContent = append([]byte{0xEF, 0xBB, 0xBF}, []byte(content)...)
+				} else {
+					fileContent = []byte(content)
+				}
+				if err := os.WriteFile(outPath, fileContent, 0644); err != nil {
 					return fmt.Errorf("write %s: %w", outPath, err)
 				}
 				fmt.Fprintf(os.Stderr, "Written: %s\n", outPath)
