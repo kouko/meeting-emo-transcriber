@@ -22,12 +22,13 @@ import (
 
 func newTranscribeCmd() *cobra.Command {
 	var (
-		inputPath   string
-		outputPath  string
-		format      string
-		language    string
-		threshold   float32
-		numSpeakers int
+		inputPath      string
+		outputPath     string
+		format         string
+		language       string
+		threshold      float32
+		matchThreshold float32
+		numSpeakers    int
 	)
 	cmd := &cobra.Command{
 		Use:   "transcribe",
@@ -142,7 +143,7 @@ func newTranscribeCmd() *cobra.Command {
 
 			speakerNames, err := diarize.ResolveSpeakerNames(
 				speakerIDs, diarResult, wavSamples, wavSampleRate,
-				profiles, float32(cfg.Threshold), store, bins.Diarize,
+				profiles, matchThreshold, store, bins.Diarize,
 			)
 			if err != nil {
 				return fmt.Errorf("resolve speaker names: %w", err)
@@ -242,6 +243,7 @@ func newTranscribeCmd() *cobra.Command {
 	cmd.Flags().StringVar(&format, "format", "txt", "output format: txt|json|srt|all (comma-separated)")
 	cmd.Flags().StringVar(&language, "language", "auto", "language: auto|zh-TW|zh|en|ja")
 	cmd.Flags().Float32Var(&threshold, "threshold", 0.7, "diarization clustering threshold (higher = more speakers)")
+	cmd.Flags().Float32Var(&matchThreshold, "match-threshold", 0.55, "speaker matching threshold for enrolled profiles")
 	cmd.Flags().IntVar(&numSpeakers, "num-speakers", 0, "expected number of speakers (0 = auto-detect)")
 	cmd.MarkFlagRequired("input")
 	return cmd
