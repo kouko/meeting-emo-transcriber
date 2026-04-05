@@ -1,6 +1,12 @@
 package commands
 
-import "github.com/spf13/cobra"
+import (
+	"os"
+	"path/filepath"
+	"strings"
+
+	"github.com/spf13/cobra"
+)
 
 var (
 	speakersDir string
@@ -8,9 +14,16 @@ var (
 	logLevel    string
 )
 
+// audioExtensions that trigger implicit transcribe
+var audioExtensions = map[string]bool{
+	".wav": true, ".mp3": true, ".m4a": true, ".flac": true,
+	".ogg": true, ".opus": true, ".aac": true, ".mp4": true,
+	".mkv": true, ".webm": true,
+}
+
 func NewRootCmd() *cobra.Command {
 	root := &cobra.Command{
-		Use:   "meeting-emo-transcriber",
+		Use:   "metr [audio file]",
 		Short: "Meeting transcriber with speaker identification and emotion recognition",
 	}
 	root.PersistentFlags().StringVar(&speakersDir, "speakers", "./speakers", "speakers directory path")
@@ -20,5 +33,25 @@ func NewRootCmd() *cobra.Command {
 	root.AddCommand(newTranscribeCmd())
 	root.AddCommand(newEnrollCmd())
 	root.AddCommand(newSpeakersCmd())
+
+	// Rewrite args: if first arg is an audio file, prepend "transcribe --input"
+	originalArgs := os.Args[1:]
+	if len(originalArgs) > 0 {
+		first := originalArgs[0]
+		// Skip if it's a known subcommand, flag, or help
+		if first != "transcribe" && first != "enroll" && first != "speakers" &&
+			first != "init" && first != "help" && first != "completion" &&
+			!strings.HasPrefix(first, "-") {
+			ext := strings.ToLower(filepath.Ext(first))
+			if audioExtensions[ext] {
+				if _, err := os.Stat(first); err == nil {
+					newArgs := []string{"transcribe", "--input", first}
+					newArgs = append(newArgs, originalArgs[1:]...)
+					root.SetArgs(newArgs)
+				}
+			}
+		}
+	}
+
 	return root
 }
