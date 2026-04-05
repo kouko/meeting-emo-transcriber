@@ -68,6 +68,7 @@ func ResolveSpeakerNames(
 	threshold float32,
 	store *speaker.Store,
 	diarizeBinPath string,
+	learn bool,
 ) ([]string, error) {
 	// Log enrolled profiles
 	if len(profiles) > 0 {
@@ -131,6 +132,14 @@ func ResolveSpeakerNames(
 			clusterNames[clusterID] = result.Name
 			matchedCount++
 			fmt.Fprintf(os.Stderr, "    → matched: %s (sim=%.2f, threshold=%.2f)\n", result.Name, result.BestSim, threshold)
+
+			if learn {
+				// Learning mode: also create speaker_N_match_Name/ folder for review
+				learnName := fmt.Sprintf("speaker_%d_match_%s", nextUnknownID, result.Name)
+				nextUnknownID++
+				persistUnknownSpeaker(store, learnName, clusterID, diarResult, wavSamples, sampleRate)
+				fmt.Fprintf(os.Stderr, "    → [learn] created %s/ for review\n", learnName)
+			}
 		} else {
 			name := fmt.Sprintf("speaker_%d", nextUnknownID)
 			nextUnknownID++

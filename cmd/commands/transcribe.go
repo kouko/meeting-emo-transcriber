@@ -29,6 +29,7 @@ func newTranscribeCmd() *cobra.Command {
 		threshold      float32
 		matchThreshold float32
 		numSpeakers    int
+		learn          bool
 	)
 	cmd := &cobra.Command{
 		Use:   "transcribe",
@@ -146,7 +147,7 @@ func newTranscribeCmd() *cobra.Command {
 
 			speakerNames, err := diarize.ResolveSpeakerNames(
 				speakerIDs, diarResult, wavSamples, wavSampleRate,
-				profiles, matchThreshold, store, bins.Diarize,
+				profiles, matchThreshold, store, bins.Diarize, learn,
 			)
 			if err != nil {
 				return fmt.Errorf("resolve speaker names: %w", err)
@@ -255,6 +256,7 @@ func newTranscribeCmd() *cobra.Command {
 	cmd.Flags().Float32Var(&threshold, "threshold", 0.8, "diarization clustering threshold (higher = more speakers)")
 	cmd.Flags().Float32Var(&matchThreshold, "match-threshold", 0.55, "speaker matching threshold for enrolled profiles")
 	cmd.Flags().IntVar(&numSpeakers, "num-speakers", 0, "expected number of speakers (0 = auto-detect)")
+	cmd.Flags().BoolVarP(&learn, "learning-mode", "l", false, "create folders for all clusters (including matched) for manual review")
 	cmd.MarkFlagRequired("input")
 	return cmd
 }
