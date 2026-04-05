@@ -281,7 +281,7 @@ func persistUnknownSpeaker(store *speaker.Store, name, clusterID string, diarRes
 	profile := types.SpeakerProfile{
 		CreatedAt:        now.Format(time.RFC3339),
 		UpdatedAt:        now.Format(time.RFC3339),
-		KnownAudioHashes: audioHashes,
+		KnownAudioHashes: nil, // intentionally empty — AutoEnroll will detect these wav files and compute merged voiceprint
 		Voiceprints:      voiceprints,
 	}
 
