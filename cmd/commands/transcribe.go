@@ -99,7 +99,7 @@ func newTranscribeCmd() *cobra.Command {
 			if err != nil {
 				return fmt.Errorf("ensure segmentation model: %w", err)
 			}
-			diarEmbModelPath, err := models.EnsureModel("eres2net-embedding")
+			diarEmbModelPath, err := models.EnsureModel("campplus-sv-zh-cn")
 			if err != nil {
 				return fmt.Errorf("ensure diarization embedding model: %w", err)
 			}
