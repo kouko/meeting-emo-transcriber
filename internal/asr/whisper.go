@@ -47,13 +47,13 @@ func buildWhisperArgs(cfg WhisperConfig, wavPath, outputBase string) []string {
 	return args
 }
 
-// cacheKey generates a short hash from file path + size + mtime.
-func cacheKey(filePath string) (string, error) {
+// cacheKey generates a short hash from file path + size + mtime + extra suffix.
+func cacheKey(filePath, extra string) (string, error) {
 	info, err := os.Stat(filePath)
 	if err != nil {
 		return "", err
 	}
-	key := fmt.Sprintf("%s|%d|%d", filePath, info.Size(), info.ModTime().UnixNano())
+	key := fmt.Sprintf("%s|%d|%d|%s", filePath, info.Size(), info.ModTime().UnixNano(), extra)
 	h := sha256.Sum256([]byte(key))
 	return hex.EncodeToString(h[:16]), nil
 }
@@ -66,7 +66,7 @@ func TranscribeWithCache(cfg WhisperConfig, wavPath, originalPath string) ([]typ
 	cacheDir := filepath.Join(embedded.CacheDir(), "cache")
 	os.MkdirAll(cacheDir, 0755)
 
-	key, err := cacheKey(originalPath)
+	key, err := cacheKey(originalPath, cfg.Language)
 	if err != nil {
 		// Can't compute cache key — fall through to normal transcription
 		return Transcribe(cfg, wavPath)
