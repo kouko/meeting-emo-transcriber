@@ -31,12 +31,12 @@ func NewDiarizer(segModelDir, embModelPath string, threads int, numClusters int,
 	config.Segmentation.Pyannote.Model = filepath.Join(segModelDir, "model.onnx")
 	config.Segmentation.NumThreads = threads
 	config.Segmentation.Debug = 1
-	config.Segmentation.Provider = "cpu"
+	config.Segmentation.Provider = "coreml"
 
 	config.Embedding.Model = embModelPath
 	config.Embedding.NumThreads = threads
 	config.Embedding.Debug = 1
-	config.Embedding.Provider = "cpu"
+	config.Embedding.Provider = "coreml"
 
 	if numClusters > 0 {
 		config.Clustering.NumClusters = numClusters
