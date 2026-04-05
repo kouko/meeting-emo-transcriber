@@ -122,6 +122,14 @@ func newTranscribeCmd() *cobra.Command {
 			defer extractor.Close()
 
 			store := speaker.NewStore(speakersDir, config.SupportedAudioExtensions())
+
+			// Auto-enroll: recompute embeddings for speakers with changed audio files
+			if enrolled, err := speaker.AutoEnroll(store, extractor, bins.FFmpeg); err != nil {
+				return fmt.Errorf("auto-enroll: %w", err)
+			} else if enrolled > 0 {
+				fmt.Fprintf(os.Stderr, "  Auto-enrolled %d speaker(s)\n", enrolled)
+			}
+
 			profiles, err := store.LoadProfiles()
 			if err != nil {
 				return fmt.Errorf("load speaker profiles: %w", err)
