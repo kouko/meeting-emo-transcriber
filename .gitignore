@@ -34,6 +34,14 @@ vendor/
 
 # Build artifacts (whisper.cpp clone, onnxruntime download cache)
 .build/
+tools/metr-diarize/.build/
+tools/metr-diarize/.swiftpm/
+
+# Datasets (benchmark data, downloaded by FluidAudio)
+Datasets/
+
+# Claude Code local settings
+.claude/
 
 # Temp files
 *.tmp
