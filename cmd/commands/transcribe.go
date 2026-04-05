@@ -95,7 +95,11 @@ func newTranscribeCmd() *cobra.Command {
 			}
 
 			// 8. Run diarization (FluidAudio subprocess, includes speaker embeddings)
-			fmt.Fprintf(os.Stderr, "[6/9] Running speaker diarization...\n")
+			speakersDesc := "auto"
+			if numSpeakers > 0 {
+				speakersDesc = fmt.Sprintf("%d", numSpeakers)
+			}
+			fmt.Fprintf(os.Stderr, "[6/9] Running speaker diarization (threshold=%.2f, num-speakers=%s)...\n", threshold, speakersDesc)
 			diarResult, err := diarize.Process(bins.Diarize, tempWavPath, threshold, numSpeakers)
 			if err != nil {
 				return fmt.Errorf("diarization: %w", err)
@@ -111,7 +115,7 @@ func newTranscribeCmd() *cobra.Command {
 			speakerIDs := diarize.AssignSpeakers(results, diarResult.Segments)
 
 			// 11. Resolve speaker names (WeSpeaker 256-dim centroid embeddings)
-			fmt.Fprintf(os.Stderr, "[7/9] Resolving speaker identities...\n")
+			fmt.Fprintf(os.Stderr, "[7/9] Resolving speaker identities (match-threshold=%.2f)...\n", matchThreshold)
 			store := speaker.NewStore(speakersDir, config.SupportedAudioExtensions())
 
 			// Auto-enroll: batch extract embeddings using FluidAudio WeSpeaker (model loaded once)
@@ -249,7 +253,7 @@ func newTranscribeCmd() *cobra.Command {
 	cmd.Flags().StringVar(&outputPath, "output", "", "output file path")
 	cmd.Flags().StringVar(&format, "format", "txt", "output format: txt|json|srt|all (comma-separated)")
 	cmd.Flags().StringVar(&language, "language", "auto", "language: auto|zh-TW|zh|en|ja")
-	cmd.Flags().Float32Var(&threshold, "threshold", 0.7, "diarization clustering threshold (higher = more speakers)")
+	cmd.Flags().Float32Var(&threshold, "threshold", 0.8, "diarization clustering threshold (higher = more speakers)")
 	cmd.Flags().Float32Var(&matchThreshold, "match-threshold", 0.55, "speaker matching threshold for enrolled profiles")
 	cmd.Flags().IntVar(&numSpeakers, "num-speakers", 0, "expected number of speakers (0 = auto-detect)")
 	cmd.MarkFlagRequired("input")
