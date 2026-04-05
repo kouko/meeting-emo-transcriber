@@ -2,16 +2,11 @@ package commands
 
 import (
 	"fmt"
-	"os"
-	"path/filepath"
-	"time"
 
 	"github.com/kouko/meeting-emo-transcriber/embedded"
-	"github.com/kouko/meeting-emo-transcriber/internal/audio"
 	"github.com/kouko/meeting-emo-transcriber/internal/config"
 	"github.com/kouko/meeting-emo-transcriber/internal/diarize"
 	"github.com/kouko/meeting-emo-transcriber/internal/speaker"
-	"github.com/kouko/meeting-emo-transcriber/internal/types"
 	"github.com/spf13/cobra"
 )
 
@@ -36,108 +31,32 @@ func newEnrollCmd() *cobra.Command {
 				return fmt.Errorf("extract binaries: %w", err)
 			}
 
-			fmt.Printf("Scanning %s/...\n", speakersDir)
-
-			var created, updated, unchanged int
-			for _, name := range names {
-				files, err := store.ListAudioFiles(name)
+			// Batch extract function (model loaded once per speaker)
+			batchExtractFn := func(wavPaths []string) ([][]float32, error) {
+				results, err := diarize.ExtractEmbeddings(bins.Diarize, wavPaths)
 				if err != nil {
-					return err
+					return nil, err
 				}
-				if len(files) == 0 {
-					fmt.Printf("  %s: no audio files, skipping\n", name)
-					continue
-				}
-
-				needsUpdate := force
-				if !force {
-					needsUpdate, err = store.NeedsUpdate(name)
-					if err != nil {
-						return err
+				out := make([][]float32, len(results))
+				for i, r := range results {
+					emb := make([]float32, len(r.Embedding))
+					for j, v := range r.Embedding {
+						emb[j] = float32(v)
 					}
+					out[i] = emb
 				}
-
-				if !needsUpdate {
-					fmt.Printf("  %s: %d samples → unchanged (cached)\n", name, len(files))
-					unchanged++
-					continue
-				}
-
-				var embeddings []types.SampleEmbedding
-				tmpDir, err := os.MkdirTemp("", "met-enroll-*")
-				if err != nil {
-					return fmt.Errorf("create temp dir: %w", err)
-				}
-
-				for _, file := range files {
-					tempWav := filepath.Join(tmpDir, "enroll.wav")
-					if err := audio.ConvertToWAV(bins.FFmpeg, file, tempWav); err != nil {
-						os.RemoveAll(tmpDir)
-						return fmt.Errorf("convert %s: %w", file, err)
-					}
-
-					// Extract embedding via FluidAudio WeSpeaker (256-dim)
-					embResult, err := diarize.ExtractEmbedding(bins.Diarize, tempWav)
-					if err != nil {
-						os.RemoveAll(tmpDir)
-						return fmt.Errorf("extract embedding from %s: %w", file, err)
-					}
-
-					emb32 := make([]float32, len(embResult.Embedding))
-					for i, v := range embResult.Embedding {
-						emb32[i] = float32(v)
-					}
-
-					hash, err := speaker.FileHash(file)
-					if err != nil {
-						os.RemoveAll(tmpDir)
-						return fmt.Errorf("hash %s: %w", file, err)
-					}
-
-					embeddings = append(embeddings, types.SampleEmbedding{
-						File:      filepath.Base(file),
-						Hash:      hash,
-						Embedding: emb32,
-					})
-				}
-				os.RemoveAll(tmpDir)
-
-				status := "created"
-				existing, _ := store.LoadProfile(name)
-				if existing != nil {
-					status = "updated"
-				}
-
-				now := time.Now().Format(time.RFC3339)
-				dim := 0
-				if len(embeddings) > 0 {
-					dim = len(embeddings[0].Embedding)
-				}
-				profile := types.SpeakerProfile{
-					Name:       name,
-					Embeddings: embeddings,
-					Dim:        dim,
-					Model:      "wespeaker_v2",
-					CreatedAt:  now,
-					UpdatedAt:  now,
-				}
-				if existing != nil && existing.CreatedAt != "" {
-					profile.CreatedAt = existing.CreatedAt
-				}
-
-				if err := store.SaveProfile(profile); err != nil {
-					return fmt.Errorf("save profile %s: %w", name, err)
-				}
-
-				fmt.Printf("  %s: %d samples → embedding computed ✓ (%s)\n", name, len(files), status)
-				if status == "created" {
-					created++
-				} else {
-					updated++
-				}
+				return out, nil
 			}
 
-			fmt.Printf("\n%d created, %d updated, %d unchanged.\n", created, updated, unchanged)
+			fmt.Printf("Scanning %s/...\n", speakersDir)
+
+			enrolled, err := speaker.AutoEnroll(store, bins.FFmpeg, batchExtractFn, force)
+			if err != nil {
+				return fmt.Errorf("enroll: %w", err)
+			}
+
+			unchanged := len(names) - enrolled
+			fmt.Printf("\n%d enrolled, %d unchanged.\n", enrolled, unchanged)
 			return nil
 		},
 	}

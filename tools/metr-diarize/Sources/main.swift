@@ -8,18 +8,24 @@ struct MetrDiarize {
 
         guard args.count >= 2 else {
             log("Usage: metr-diarize <audio.wav> [--threshold <float>] [--num-speakers <int>]")
-            log("       metr-diarize --extract-embedding <audio.wav>")
+            log("       metr-diarize --extract-embeddings <file1.wav> [file2.wav ...]")
             exit(1)
         }
 
-        // Mode: extract single embedding (for enroll)
-        if args.contains("--extract-embedding") {
-            guard let idx = args.firstIndex(of: "--extract-embedding"),
-                  idx + 1 < args.count else {
-                log("Error: --extract-embedding requires an audio file path")
+        // Mode: batch extract embeddings (for enroll)
+        if let idx = args.firstIndex(of: "--extract-embeddings") {
+            let wavFiles = Array(args[(idx + 1)...])
+            guard !wavFiles.isEmpty else {
+                log("Error: --extract-embeddings requires at least one audio file")
                 exit(1)
             }
-            await extractEmbedding(audioPath: args[idx + 1])
+            await extractEmbeddings(audioPaths: wavFiles)
+            return
+        }
+
+        // Mode: single extract embedding (backward compat)
+        if let idx = args.firstIndex(of: "--extract-embedding"), idx + 1 < args.count {
+            await extractEmbeddings(audioPaths: [args[idx + 1]])
             return
         }
 
@@ -70,31 +76,37 @@ struct MetrDiarize {
         }
     }
 
-    // MARK: - Extract Embedding Mode
+    // MARK: - Batch Extract Embeddings Mode
 
-    static func extractEmbedding(audioPath: String) async {
+    static func extractEmbeddings(audioPaths: [String]) async {
         do {
-            // Use diarization with num_speakers=1 to get a single speaker embedding
+            // Load model ONCE for all files
             let (diarizer, _) = try await loadDiarizer(threshold: 0.6, numSpeakers: 1)
 
-            log("Extracting speaker embedding...")
-            let url = URL(fileURLWithPath: audioPath)
-            let result = try await diarizer.process(url)
+            var results: [[String: Any]] = []
+            for audioPath in audioPaths {
+                log("Extracting embedding: \(audioPath)...")
+                let url = URL(fileURLWithPath: audioPath)
+                let result = try await diarizer.process(url)
 
-            guard let db = result.speakerDatabase, let firstEntry = db.first else {
-                log("Error: no embedding extracted")
-                exit(1)
+                guard let db = result.speakerDatabase, let firstEntry = db.first else {
+                    log("Warning: no embedding extracted for \(audioPath)")
+                    results.append(["file": audioPath, "embedding": [] as [Double], "dim": 0, "model": "wespeaker_v2"])
+                    continue
+                }
+
+                let embedding = firstEntry.value.map { Double($0) }
+                results.append([
+                    "file": audioPath,
+                    "embedding": embedding,
+                    "dim": embedding.count,
+                    "model": "wespeaker_v2",
+                ])
             }
 
-            let embedding = firstEntry.value.map { Double($0) }
-            log("Embedding extracted: \(embedding.count) dimensions")
+            log("\(results.count) embeddings extracted")
 
-            let json: [String: Any] = [
-                "embedding": embedding,
-                "dim": embedding.count,
-                "model": "wespeaker_v2",
-            ]
-            let data = try JSONSerialization.data(withJSONObject: json, options: [.prettyPrinted, .sortedKeys])
+            let data = try JSONSerialization.data(withJSONObject: results, options: [.prettyPrinted, .sortedKeys])
             FileHandle.standardOutput.write(data)
             FileHandle.standardOutput.write("\n".data(using: .utf8)!)
 

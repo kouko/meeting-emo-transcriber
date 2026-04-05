@@ -45,14 +45,14 @@ func newTranscribeCmd() *cobra.Command {
 			}
 
 			// 3. Extract embedded binaries
-			fmt.Fprintf(os.Stderr, "[1/8] Extracting embedded binaries...\n")
+			fmt.Fprintf(os.Stderr, "[1/9] Extracting embedded binaries...\n")
 			bins, err := embedded.ExtractAll()
 			if err != nil {
 				return fmt.Errorf("extract binaries: %w", err)
 			}
 
 			// 4. Ensure ASR model
-			fmt.Fprintf(os.Stderr, "[2/8] Ensuring ASR model...\n")
+			fmt.Fprintf(os.Stderr, "[2/9] Ensuring ASR model...\n")
 			asrModelName := models.ResolveASRModel(language)
 			asrModelPath, err := models.EnsureModel(asrModelName)
 			if err != nil {
@@ -60,7 +60,7 @@ func newTranscribeCmd() *cobra.Command {
 			}
 
 			// 5. Ensure VAD model
-			fmt.Fprintf(os.Stderr, "[3/8] Ensuring VAD model...\n")
+			fmt.Fprintf(os.Stderr, "[3/9] Ensuring VAD model...\n")
 			vadModelPath, err := models.EnsureModel("silero-vad-v6.2.0")
 			if err != nil {
 				return fmt.Errorf("ensure VAD model: %w", err)
@@ -73,14 +73,14 @@ func newTranscribeCmd() *cobra.Command {
 			}
 			defer os.RemoveAll(tmpDir)
 
-			fmt.Fprintf(os.Stderr, "[4/8] Converting audio to WAV...\n")
+			fmt.Fprintf(os.Stderr, "[4/9] Converting audio to WAV...\n")
 			tempWavPath := filepath.Join(tmpDir, "audio.wav")
 			if err := audio.ConvertToWAV(bins.FFmpeg, inputPath, tempWavPath); err != nil {
 				return fmt.Errorf("convert to WAV: %w", err)
 			}
 
 			// 7. Run ASR
-			fmt.Fprintf(os.Stderr, "[5/8] Running speech recognition...\n")
+			fmt.Fprintf(os.Stderr, "[5/9] Running speech recognition...\n")
 			whisperCfg := asr.WhisperConfig{
 				BinPath:      bins.WhisperCLI,
 				ModelPath:    asrModelPath,
@@ -94,7 +94,7 @@ func newTranscribeCmd() *cobra.Command {
 			}
 
 			// 8. Run diarization (FluidAudio subprocess, includes speaker embeddings)
-			fmt.Fprintf(os.Stderr, "[6/8] Running speaker diarization...\n")
+			fmt.Fprintf(os.Stderr, "[6/9] Running speaker diarization...\n")
 			diarResult, err := diarize.Process(bins.Diarize, tempWavPath, threshold, numSpeakers)
 			if err != nil {
 				return fmt.Errorf("diarization: %w", err)
@@ -110,22 +110,26 @@ func newTranscribeCmd() *cobra.Command {
 			speakerIDs := diarize.AssignSpeakers(results, diarResult.Segments)
 
 			// 11. Resolve speaker names (WeSpeaker 256-dim centroid embeddings)
-			fmt.Fprintf(os.Stderr, "[7/8] Resolving speaker identities...\n")
+			fmt.Fprintf(os.Stderr, "[7/9] Resolving speaker identities...\n")
 			store := speaker.NewStore(speakersDir, config.SupportedAudioExtensions())
 
-			// Auto-enroll: recompute embeddings using FluidAudio WeSpeaker
-			extractFn := func(wavPath string) ([]float32, error) {
-				result, err := diarize.ExtractEmbedding(bins.Diarize, wavPath)
+			// Auto-enroll: batch extract embeddings using FluidAudio WeSpeaker (model loaded once)
+			batchExtractFn := func(wavPaths []string) ([][]float32, error) {
+				results, err := diarize.ExtractEmbeddings(bins.Diarize, wavPaths)
 				if err != nil {
 					return nil, err
 				}
-				emb := make([]float32, len(result.Embedding))
-				for i, v := range result.Embedding {
-					emb[i] = float32(v)
+				out := make([][]float32, len(results))
+				for i, r := range results {
+					emb := make([]float32, len(r.Embedding))
+					for j, v := range r.Embedding {
+						emb[j] = float32(v)
+					}
+					out[i] = emb
 				}
-				return emb, nil
+				return out, nil
 			}
-			if enrolled, err := speaker.AutoEnroll(store, bins.FFmpeg, extractFn); err != nil {
+			if enrolled, err := speaker.AutoEnroll(store, bins.FFmpeg, batchExtractFn); err != nil {
 				return fmt.Errorf("auto-enroll: %w", err)
 			} else if enrolled > 0 {
 				fmt.Fprintf(os.Stderr, "  Auto-enrolled %d speaker(s)\n", enrolled)
@@ -145,6 +149,7 @@ func newTranscribeCmd() *cobra.Command {
 			}
 
 			// 13. Emotion classification + build segments
+			fmt.Fprintf(os.Stderr, "[8/9] Running emotion classification...\n")
 			emotionModelDir, err := models.EnsureModel("sensevoice-small-int8")
 			if err != nil {
 				return fmt.Errorf("ensure emotion model: %w", err)
@@ -215,7 +220,7 @@ func newTranscribeCmd() *cobra.Command {
 			}
 
 			// 15. Format and write output files
-			fmt.Fprintf(os.Stderr, "[8/8] Writing output files...\n")
+			fmt.Fprintf(os.Stderr, "[9/9] Writing output files...\n")
 			formats := config.ParseFormats(format)
 			for _, fmt_ := range formats {
 				outPath := resolveOutputPath(inputPath, outputPath, fmt_)

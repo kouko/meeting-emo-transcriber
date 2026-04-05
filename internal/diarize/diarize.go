@@ -50,29 +50,43 @@ func Process(binPath, wavPath string, threshold float32, numSpeakers int) (*Diar
 	return &result, nil
 }
 
-// EmbeddingResult is the JSON output from metr-diarize --extract-embedding.
+// EmbeddingResult is the JSON output from metr-diarize --extract-embeddings.
 type EmbeddingResult struct {
+	File      string    `json:"file"`
 	Embedding []float64 `json:"embedding"`
 	Dim       int       `json:"dim"`
 	Model     string    `json:"model"`
 }
 
-// ExtractEmbedding runs metr-diarize in embedding extraction mode.
-// Returns a single speaker embedding for the given audio file.
+// ExtractEmbedding runs metr-diarize in embedding extraction mode for a single file.
 func ExtractEmbedding(binPath, wavPath string) (*EmbeddingResult, error) {
-	cmd := exec.Command(binPath, "--extract-embedding", wavPath)
+	results, err := ExtractEmbeddings(binPath, []string{wavPath})
+	if err != nil {
+		return nil, err
+	}
+	if len(results) == 0 {
+		return nil, fmt.Errorf("no embedding extracted")
+	}
+	return &results[0], nil
+}
+
+// ExtractEmbeddings runs metr-diarize in batch embedding extraction mode.
+// Loads the model once for all files. Much faster than calling ExtractEmbedding per file.
+func ExtractEmbeddings(binPath string, wavPaths []string) ([]EmbeddingResult, error) {
+	args := append([]string{"--extract-embeddings"}, wavPaths...)
+	cmd := exec.Command(binPath, args...)
 	var stdout bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = os.Stderr
 
 	if err := cmd.Run(); err != nil {
-		return nil, fmt.Errorf("metr-diarize extract-embedding failed: %w", err)
+		return nil, fmt.Errorf("metr-diarize extract-embeddings failed: %w", err)
 	}
 
-	var result EmbeddingResult
-	if err := json.Unmarshal(stdout.Bytes(), &result); err != nil {
-		return nil, fmt.Errorf("parse embedding output: %w", err)
+	var results []EmbeddingResult
+	if err := json.Unmarshal(stdout.Bytes(), &results); err != nil {
+		return nil, fmt.Errorf("parse embeddings output: %w", err)
 	}
 
-	return &result, nil
+	return results, nil
 }
