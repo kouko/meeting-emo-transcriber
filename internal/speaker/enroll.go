@@ -1,6 +1,7 @@
 package speaker
 
 import (
+	"crypto/rand"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -11,14 +12,13 @@ import (
 )
 
 // BatchEmbeddingFunc extracts speaker embeddings from multiple WAV files at once.
-// Model is loaded once for all files. Returns embeddings parallel to input paths.
 type BatchEmbeddingFunc func(wavPaths []string) ([][]float32, error)
 
-// AutoEnroll checks all speakers in the store and recomputes embeddings
-// for any that need updating. Uses batch extraction (model loaded once).
-// Returns the number of speakers updated.
+// AutoEnroll checks all speakers for manually added audio files (not in known_audio_hashes).
+// Only computes embeddings for new files. Returns the number of speakers updated.
 func AutoEnroll(store *Store, ffmpegPath string, batchExtractFn BatchEmbeddingFunc, forceAll ...bool) (int, error) {
 	force := len(forceAll) > 0 && forceAll[0]
+
 	names, err := store.List()
 	if err != nil {
 		return 0, err
@@ -26,35 +26,35 @@ func AutoEnroll(store *Store, ffmpegPath string, batchExtractFn BatchEmbeddingFu
 
 	updated := 0
 	for _, name := range names {
-		files, err := store.ListAudioFiles(name)
-		if err != nil {
-			return updated, err
-		}
-		if len(files) == 0 {
-			continue
-		}
-
-		needsUpdate := force
-		if !force {
-			needsUpdate, err = store.NeedsUpdate(name)
+		var newFiles []string
+		if force {
+			// Force: treat all audio files as new
+			newFiles, err = store.ListAudioFiles(name)
+			if err != nil {
+				return updated, err
+			}
+		} else {
+			// Only find files not in known_audio_hashes
+			newFiles, err = store.FindNewAudioFiles(name)
 			if err != nil {
 				return updated, err
 			}
 		}
-		if !needsUpdate {
+
+		if len(newFiles) == 0 {
 			continue
 		}
 
-		fmt.Fprintf(os.Stderr, "  Auto-enrolling %s (%d samples)...\n", name, len(files))
+		fmt.Fprintf(os.Stderr, "  Auto-enrolling %s (%d new samples)...\n", name, len(newFiles))
 
 		tmpDir, err := os.MkdirTemp("", "met-enroll-*")
 		if err != nil {
 			return updated, fmt.Errorf("create temp dir: %w", err)
 		}
 
-		// Convert all audio files to WAV first
+		// Convert all new audio files to WAV
 		var wavPaths []string
-		for i, file := range files {
+		for i, file := range newFiles {
 			tempWav := filepath.Join(tmpDir, fmt.Sprintf("enroll_%d.wav", i))
 			if err := audio.ConvertToWAV(ffmpegPath, file, tempWav); err != nil {
 				os.RemoveAll(tmpDir)
@@ -63,54 +63,62 @@ func AutoEnroll(store *Store, ffmpegPath string, batchExtractFn BatchEmbeddingFu
 			wavPaths = append(wavPaths, tempWav)
 		}
 
-		// Batch extract embeddings (model loaded once)
+		// Batch extract embeddings
 		embResults, err := batchExtractFn(wavPaths)
 		if err != nil {
 			os.RemoveAll(tmpDir)
 			return updated, fmt.Errorf("batch extract embeddings for %s: %w", name, err)
 		}
+		os.RemoveAll(tmpDir)
 
+		// Build embeddings and collect hashes
+		now := time.Now()
 		var embeddings []types.SampleEmbedding
-		for i, file := range files {
+		var audioHashes []string
+		for i, file := range newFiles {
 			if i >= len(embResults) {
 				break
 			}
 			hash, err := FileHash(file)
 			if err != nil {
-				os.RemoveAll(tmpDir)
 				return updated, fmt.Errorf("hash %s: %w", file, err)
 			}
+			audioHashes = append(audioHashes, hash)
+
+			dim := len(embResults[i])
 			embeddings = append(embeddings, types.SampleEmbedding{
-				File:      filepath.Base(file),
-				Hash:      hash,
+				Source:    filepath.Base(file),
+				CreatedAt: now.Format(time.RFC3339),
+				Dim:       dim,
+				Model:     "wespeaker_v2",
+				Type:      "extracted",
 				Embedding: embResults[i],
 			})
 		}
-		os.RemoveAll(tmpDir)
 
-		existing, _ := store.LoadProfile(name)
-		now := time.Now().Format(time.RFC3339)
-		dim := 0
-		if len(embeddings) > 0 {
-			dim = len(embeddings[0].Embedding)
-		}
+		// Save as new profile file
+		uuid := shortEnrollUUID()
+		datePrefix := now.Format("20060102")
+		profileFilename := fmt.Sprintf("%s-%s.profile.json", datePrefix, uuid)
+
 		profile := types.SpeakerProfile{
-			Name:       name,
-			Embeddings: embeddings,
-			Dim:        dim,
-			Model:      "wespeaker_v2",
-			CreatedAt:  now,
-			UpdatedAt:  now,
-		}
-		if existing != nil && existing.CreatedAt != "" {
-			profile.CreatedAt = existing.CreatedAt
+			CreatedAt:        now.Format(time.RFC3339),
+			UpdatedAt:        now.Format(time.RFC3339),
+			KnownAudioHashes: audioHashes,
+			Embeddings:       embeddings,
 		}
 
-		if err := store.SaveProfile(profile); err != nil {
+		if err := store.SaveProfile(name, profileFilename, profile); err != nil {
 			return updated, fmt.Errorf("save profile %s: %w", name, err)
 		}
 		updated++
 	}
 
 	return updated, nil
+}
+
+func shortEnrollUUID() string {
+	b := make([]byte, 4)
+	rand.Read(b)
+	return fmt.Sprintf("%x", b)
 }

@@ -8,16 +8,15 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/kouko/meeting-emo-transcriber/internal/types"
 )
 
-const profileFilename = ".profile.json"
-
 // Store manages the folder-driven speaker voiceprint store.
 type Store struct {
-	root       string
-	audioExts  map[string]struct{}
+	root      string
+	audioExts map[string]struct{}
 }
 
 // NewStore returns a Store rooted at dir, recognising the given audio extensions.
@@ -35,7 +34,6 @@ func (s *Store) Root() string {
 }
 
 // List returns the names of all subdirectories in the root (each is a speaker).
-// Returns an empty slice (not an error) if the root does not exist.
 func (s *Store) List() ([]string, error) {
 	entries, err := os.ReadDir(s.root)
 	if err != nil {
@@ -54,8 +52,8 @@ func (s *Store) List() ([]string, error) {
 	return names, nil
 }
 
-// LoadProfiles loads all .profile.json files found in speaker subdirectories.
-// Speakers that have no .profile.json are silently skipped.
+// LoadProfiles loads and merges all *.profile.json files for every speaker.
+// Also loads legacy .profile.json for backward compatibility.
 func (s *Store) LoadProfiles() ([]types.SpeakerProfile, error) {
 	speakers, err := s.List()
 	if err != nil {
@@ -64,45 +62,79 @@ func (s *Store) LoadProfiles() ([]types.SpeakerProfile, error) {
 
 	var profiles []types.SpeakerProfile
 	for _, name := range speakers {
-		profilePath := filepath.Join(s.root, name, profileFilename)
-		data, err := os.ReadFile(profilePath)
+		p, err := s.LoadProfile(name)
 		if err != nil {
-			if errors.Is(err, os.ErrNotExist) {
-				continue
-			}
+			return nil, err
+		}
+		if p != nil && len(p.Embeddings) > 0 {
+			profiles = append(profiles, *p)
+		}
+	}
+	return profiles, nil
+}
+
+// LoadProfile loads and merges all *.profile.json files in a speaker's directory.
+// Returns nil, nil if no profiles exist.
+func (s *Store) LoadProfile(name string) (*types.SpeakerProfile, error) {
+	speakerDir := filepath.Join(s.root, name)
+	entries, err := os.ReadDir(speakerDir)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil, nil
+		}
+		return nil, err
+	}
+
+	merged := &types.SpeakerProfile{
+		Name: name,
+	}
+	found := false
+
+	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
+		fname := e.Name()
+		if !strings.HasSuffix(fname, ".profile.json") {
+			continue
+		}
+
+		data, err := os.ReadFile(filepath.Join(speakerDir, fname))
+		if err != nil {
 			return nil, err
 		}
 		var p types.SpeakerProfile
 		if err := json.Unmarshal(data, &p); err != nil {
 			return nil, err
 		}
-		profiles = append(profiles, p)
-	}
-	return profiles, nil
-}
 
-// LoadProfile loads a single speaker's profile.
-// Returns nil, nil if profile doesn't exist.
-func (s *Store) LoadProfile(name string) (*types.SpeakerProfile, error) {
-	profilePath := filepath.Join(s.root, name, profileFilename)
-	data, err := os.ReadFile(profilePath)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil, nil
+		// Merge embeddings
+		merged.Embeddings = append(merged.Embeddings, p.Embeddings...)
+
+		// Merge known audio hashes
+		merged.KnownAudioHashes = append(merged.KnownAudioHashes, p.KnownAudioHashes...)
+
+		// Track earliest created_at and latest updated_at
+		if merged.CreatedAt == "" || (p.CreatedAt != "" && p.CreatedAt < merged.CreatedAt) {
+			merged.CreatedAt = p.CreatedAt
 		}
-		return nil, err
+		if p.UpdatedAt > merged.UpdatedAt {
+			merged.UpdatedAt = p.UpdatedAt
+		}
+
+		found = true
 	}
-	var profile types.SpeakerProfile
-	if err := json.Unmarshal(data, &profile); err != nil {
-		return nil, err
+
+	if !found {
+		return nil, nil
 	}
-	return &profile, nil
+	return merged, nil
 }
 
-// SaveProfile writes (or overwrites) the .profile.json for the given speaker,
-// creating the speaker subdirectory if necessary.
-func (s *Store) SaveProfile(profile types.SpeakerProfile) error {
-	speakerDir := filepath.Join(s.root, profile.Name)
+// SaveProfile writes a profile to a named file in the speaker's directory.
+// filename should be like "YYYYMMDD-UUID.profile.json".
+func (s *Store) SaveProfile(name, filename string, profile types.SpeakerProfile) error {
+	speakerDir := filepath.Join(s.root, name)
 	if err := os.MkdirAll(speakerDir, 0755); err != nil {
 		return err
 	}
@@ -112,12 +144,10 @@ func (s *Store) SaveProfile(profile types.SpeakerProfile) error {
 		return err
 	}
 
-	return os.WriteFile(filepath.Join(speakerDir, profileFilename), data, 0644)
+	return os.WriteFile(filepath.Join(speakerDir, filename), data, 0644)
 }
 
 // ListAudioFiles returns the paths of audio files inside a speaker's directory.
-// Only files whose extension is in the supported set are returned; hidden files
-// (e.g. .profile.json) are excluded.
 func (s *Store) ListAudioFiles(speaker string) ([]string, error) {
 	speakerDir := filepath.Join(s.root, speaker)
 	entries, err := os.ReadDir(speakerDir)
@@ -139,65 +169,41 @@ func (s *Store) ListAudioFiles(speaker string) ([]string, error) {
 	return files, nil
 }
 
-// NeedsUpdate reports whether the speaker's profile is missing or out of date
-// relative to the audio files currently on disk.
-//
-// Returns true when:
-//   - .profile.json does not exist, or
-//   - the set of audio files differs from what is recorded in the profile, or
-//   - any audio file's SHA-256 hash differs from the cached value.
-func (s *Store) NeedsUpdate(speaker string) (bool, error) {
-	profilePath := filepath.Join(s.root, speaker, profileFilename)
-	data, err := os.ReadFile(profilePath)
+// FindNewAudioFiles returns audio files whose hash is NOT in any profile's known_audio_hashes.
+// These are files manually added by the user.
+func (s *Store) FindNewAudioFiles(speaker string) ([]string, error) {
+	profile, err := s.LoadProfile(speaker)
 	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			return true, nil
-		}
-		return false, err
+		return nil, err
 	}
 
-	var profile types.SpeakerProfile
-	if err := json.Unmarshal(data, &profile); err != nil {
-		return true, nil
+	// Build hash set from all profiles
+	knownHashes := make(map[string]bool)
+	if profile != nil {
+		for _, h := range profile.KnownAudioHashes {
+			knownHashes[h] = true
+		}
 	}
 
 	audioFiles, err := s.ListAudioFiles(speaker)
 	if err != nil {
-		return false, err
+		return nil, err
 	}
 
-	// Build a map of basename -> hash from the cached profile.
-	cached := make(map[string]string, len(profile.Embeddings))
-	for _, e := range profile.Embeddings {
-		cached[e.File] = e.Hash
-	}
-
-	// If the count differs, an update is needed.
-	if len(audioFiles) != len(cached) {
-		return true, nil
-	}
-
-	// Verify each audio file against the cache.
+	var newFiles []string
 	for _, path := range audioFiles {
-		base := filepath.Base(path)
-		cachedHash, ok := cached[base]
-		if !ok {
-			return true, nil
-		}
-		current, err := FileHash(path)
+		hash, err := FileHash(path)
 		if err != nil {
-			return false, err
+			return nil, err
 		}
-		if current != cachedHash {
-			return true, nil
+		if !knownHashes[hash] {
+			newFiles = append(newFiles, path)
 		}
 	}
-
-	return false, nil
+	return newFiles, nil
 }
 
-// FileHash computes the SHA-256 hash of the file at path and returns it as
-// "sha256:<hex>".
+// FileHash computes the SHA-256 hash of the file at path and returns it as "sha256:<hex>".
 func FileHash(path string) (string, error) {
 	f, err := os.Open(path)
 	if err != nil {

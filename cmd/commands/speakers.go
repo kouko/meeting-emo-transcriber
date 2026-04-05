@@ -40,12 +40,17 @@ func newSpeakersListCmd() *cobra.Command {
 			}
 			for _, name := range names {
 				files, _ := store.ListAudioFiles(name)
-				needsUpdate, _ := store.NeedsUpdate(name)
-				status := "enrolled"
-				if needsUpdate {
-					status = "needs enrollment"
+				profile, _ := store.LoadProfile(name)
+				status := "no profile"
+				if profile != nil && len(profile.Embeddings) > 0 {
+					newFiles, _ := store.FindNewAudioFiles(name)
+					if len(newFiles) > 0 {
+						status = fmt.Sprintf("enrolled, %d new samples", len(newFiles))
+					} else {
+						status = fmt.Sprintf("enrolled, %d embeddings", len(profile.Embeddings))
+					}
 				}
-				fmt.Printf("  %s: %d samples (%s)\n", name, len(files), status)
+				fmt.Printf("  %s: %d audio files (%s)\n", name, len(files), status)
 			}
 			return nil
 		},

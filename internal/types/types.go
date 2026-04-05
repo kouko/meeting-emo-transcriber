@@ -37,19 +37,24 @@ type Metadata struct {
 	Date               string `json:"date"`
 }
 
+// SpeakerProfile stores speaker embeddings from one or more sources.
+// Multiple *.profile.json files in a speaker directory are merged on load.
 type SpeakerProfile struct {
-	Name       string            `json:"name"`
-	Embeddings []SampleEmbedding `json:"embeddings"`
-	Dim        int               `json:"dim"`
-	Model      string            `json:"model"`
-	CreatedAt  string            `json:"created_at"`
-	UpdatedAt  string            `json:"updated_at"`
+	Name             string            `json:"-"`                        // speaker directory name (not stored in JSON)
+	CreatedAt        string            `json:"created_at"`               // first created
+	UpdatedAt        string            `json:"updated_at"`               // last modified
+	KnownAudioHashes []string          `json:"known_audio_hashes"`       // hashes of auto-generated wav files
+	Embeddings       []SampleEmbedding `json:"embeddings"`               // one or more embeddings from different sources
 }
 
+// SampleEmbedding is a single embedding with its provenance metadata.
 type SampleEmbedding struct {
-	File      string    `json:"file"`
-	Hash      string    `json:"hash"`
-	Embedding []float32 `json:"embedding"`
+	Source    string    `json:"source"`     // source audio file name (e.g., "20260320 1401 Recording.mp3")
+	CreatedAt string   `json:"created_at"` // when this embedding was computed
+	Dim       int      `json:"dim"`        // embedding dimension (256 for WeSpeaker v2)
+	Model     string   `json:"model"`      // model used (e.g., "wespeaker_v2")
+	Type      string   `json:"type"`       // "centroid" (from diarization) or "extracted" (from single wav)
+	Embedding []float32 `json:"embedding"` // the embedding vector
 }
 
 type MatchResult struct {
