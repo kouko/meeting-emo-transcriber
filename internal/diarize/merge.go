@@ -65,9 +65,9 @@ func ResolveSpeakerNames(
 	for clusterID := range clusterSet {
 		name := ""
 
-		// Match via centroid embedding
+		// Match via centroid voiceprint
 		if len(profiles) > 0 {
-			if centroid, ok := diarResult.SpeakerEmbeddings[clusterID]; ok && len(centroid) > 0 {
+			if centroid, ok := diarResult.SpeakerVoiceprints[clusterID]; ok && len(centroid) > 0 {
 				centroidF32 := float64sToFloat32s(centroid)
 				name = matchAgainstProfiles(centroidF32, profiles, threshold)
 			}
@@ -98,11 +98,11 @@ func matchAgainstProfiles(embedding []float32, profiles []types.SpeakerProfile, 
 	var bestSim float32 = -1
 
 	for _, profile := range profiles {
-		for _, sample := range profile.Embeddings {
-			if len(sample.Embedding) != len(embedding) {
+		for _, sample := range profile.Voiceprints {
+			if len(sample.Vector) != len(embedding) {
 				continue
 			}
-			sim := speaker.CosineSimilarity(embedding, sample.Embedding)
+			sim := speaker.CosineSimilarity(embedding, sample.Vector)
 			if sim > bestSim {
 				bestSim = sim
 				bestName = profile.Name
@@ -167,16 +167,17 @@ func persistUnknownSpeaker(store *speaker.Store, name, clusterID string, diarRes
 		audioHashes = append(audioHashes, hash)
 	}
 
-	// Build profile with centroid embedding
-	var embeddings []types.SampleEmbedding
-	if centroid, ok := diarResult.SpeakerEmbeddings[clusterID]; ok && len(centroid) > 0 {
-		embeddings = append(embeddings, types.SampleEmbedding{
-			Source:    "auto-discover",
-			CreatedAt: now.Format(time.RFC3339),
-			Dim:       len(centroid),
-			Model:     "wespeaker_v2",
-			Type:      "centroid",
-			Embedding: float64sToFloat32s(centroid),
+	// Build profile with centroid voiceprint
+	var voiceprints []types.Voiceprint
+	if centroid, ok := diarResult.SpeakerVoiceprints[clusterID]; ok && len(centroid) > 0 {
+		voiceprints = append(voiceprints, types.Voiceprint{
+			Source:     "auto-discover",
+			CreatedAt:  now.Format(time.RFC3339),
+			Dim:        len(centroid),
+			Model:      "wespeaker_v2",
+			Projection: "plda_pyannote_community_1",
+			Type:       "centroid",
+			Vector:     float64sToFloat32s(centroid),
 		})
 	}
 
@@ -184,7 +185,7 @@ func persistUnknownSpeaker(store *speaker.Store, name, clusterID string, diarRes
 		CreatedAt:        now.Format(time.RFC3339),
 		UpdatedAt:        now.Format(time.RFC3339),
 		KnownAudioHashes: audioHashes,
-		Embeddings:       embeddings,
+		Voiceprints:      voiceprints,
 	}
 
 	profileFilename := fmt.Sprintf("%s-%s.profile.json", datePrefix, uuid)

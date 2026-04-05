@@ -42,12 +42,12 @@ func newSpeakersListCmd() *cobra.Command {
 				files, _ := store.ListAudioFiles(name)
 				profile, _ := store.LoadProfile(name)
 				status := "no profile"
-				if profile != nil && len(profile.Embeddings) > 0 {
+				if profile != nil && len(profile.Voiceprints) > 0 {
 					newFiles, _ := store.FindNewAudioFiles(name)
 					if len(newFiles) > 0 {
 						status = fmt.Sprintf("enrolled, %d new samples", len(newFiles))
 					} else {
-						status = fmt.Sprintf("enrolled, %d embeddings", len(profile.Embeddings))
+						status = fmt.Sprintf("enrolled, %d voiceprints", len(profile.Voiceprints))
 					}
 				}
 				fmt.Printf("  %s: %d audio files (%s)\n", name, len(files), status)
@@ -76,8 +76,8 @@ func newSpeakersVerifyCmd() *cobra.Command {
 			if profile == nil {
 				return fmt.Errorf("speaker %q not found in %s", name, speakersDir)
 			}
-			if len(profile.Embeddings) == 0 {
-				return fmt.Errorf("speaker %q has no embeddings (run enroll first)", name)
+			if len(profile.Voiceprints) == 0 {
+				return fmt.Errorf("speaker %q has no voiceprints (run enroll first)", name)
 			}
 
 			bins, err := embedded.ExtractAll()
@@ -97,14 +97,14 @@ func newSpeakersVerifyCmd() *cobra.Command {
 				return fmt.Errorf("convert audio: %w", err)
 			}
 
-			// Extract embedding via FluidAudio WeSpeaker (256-dim)
-			embResult, err := diarize.ExtractEmbedding(bins.Diarize, tempWav)
+			// Extract voiceprint via FluidAudio WeSpeaker (256-dim)
+			vpResult, err := diarize.ExtractVoiceprint(bins.Diarize, tempWav)
 			if err != nil {
-				return fmt.Errorf("extract embedding: %w", err)
+				return fmt.Errorf("extract voiceprint: %w", err)
 			}
 
-			testEmb := make([]float32, len(embResult.Embedding))
-			for i, v := range embResult.Embedding {
+			testEmb := make([]float32, len(vpResult.Vector))
+			for i, v := range vpResult.Vector {
 				testEmb[i] = float32(v)
 			}
 

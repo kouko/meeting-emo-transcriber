@@ -11,12 +11,12 @@ import (
 	"github.com/kouko/meeting-emo-transcriber/internal/types"
 )
 
-// BatchEmbeddingFunc extracts speaker embeddings from multiple WAV files at once.
-type BatchEmbeddingFunc func(wavPaths []string) ([][]float32, error)
+// BatchVoiceprintFunc extracts speaker voiceprints from multiple WAV files at once.
+type BatchVoiceprintFunc func(wavPaths []string) ([][]float32, error)
 
 // AutoEnroll checks all speakers for manually added audio files (not in known_audio_hashes).
 // Only computes embeddings for new files. Returns the number of speakers updated.
-func AutoEnroll(store *Store, ffmpegPath string, batchExtractFn BatchEmbeddingFunc, forceAll ...bool) (int, error) {
+func AutoEnroll(store *Store, ffmpegPath string, batchExtractFn BatchVoiceprintFunc, forceAll ...bool) (int, error) {
 	force := len(forceAll) > 0 && forceAll[0]
 
 	names, err := store.List()
@@ -71,9 +71,9 @@ func AutoEnroll(store *Store, ffmpegPath string, batchExtractFn BatchEmbeddingFu
 		}
 		os.RemoveAll(tmpDir)
 
-		// Build embeddings and collect hashes
+		// Build voiceprints and collect hashes
 		now := time.Now()
-		var embeddings []types.SampleEmbedding
+		var voiceprints []types.Voiceprint
 		var audioHashes []string
 		for i, file := range newFiles {
 			if i >= len(embResults) {
@@ -86,13 +86,14 @@ func AutoEnroll(store *Store, ffmpegPath string, batchExtractFn BatchEmbeddingFu
 			audioHashes = append(audioHashes, hash)
 
 			dim := len(embResults[i])
-			embeddings = append(embeddings, types.SampleEmbedding{
-				Source:    filepath.Base(file),
-				CreatedAt: now.Format(time.RFC3339),
-				Dim:       dim,
-				Model:     "wespeaker_v2",
-				Type:      "extracted",
-				Embedding: embResults[i],
+			voiceprints = append(voiceprints, types.Voiceprint{
+				Source:     filepath.Base(file),
+				CreatedAt:  now.Format(time.RFC3339),
+				Dim:        dim,
+				Model:      "wespeaker_v2",
+				Projection: "plda_pyannote_community_1",
+				Type:       "extracted",
+				Vector:     embResults[i],
 			})
 		}
 
@@ -105,7 +106,7 @@ func AutoEnroll(store *Store, ffmpegPath string, batchExtractFn BatchEmbeddingFu
 			CreatedAt:        now.Format(time.RFC3339),
 			UpdatedAt:        now.Format(time.RFC3339),
 			KnownAudioHashes: audioHashes,
-			Embeddings:       embeddings,
+			Voiceprints:      voiceprints,
 		}
 
 		if err := store.SaveProfile(name, profileFilename, profile); err != nil {

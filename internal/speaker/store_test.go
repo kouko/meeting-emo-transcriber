@@ -72,8 +72,8 @@ func TestStore_LoadProfiles_WithProfile(t *testing.T) {
 	os.MkdirAll(speakerDir, 0755)
 
 	profile := types.SpeakerProfile{
-		Embeddings: []types.SampleEmbedding{
-			{Source: "test.wav", Embedding: []float32{1, 0, 0}},
+		Voiceprints: []types.Voiceprint{
+			{Source: "test.wav", Vector: []float32{1, 0, 0}},
 		},
 	}
 	data, _ := json.MarshalIndent(profile, "", "  ")
@@ -97,8 +97,8 @@ func TestStore_SaveProfile(t *testing.T) {
 	store := NewStore(dir, supportedExtensions())
 
 	profile := types.SpeakerProfile{
-		Embeddings: []types.SampleEmbedding{
-			{Source: "test.wav", Embedding: []float32{1, 0, 0}},
+		Voiceprints: []types.Voiceprint{
+			{Source: "test.wav", Vector: []float32{1, 0, 0}},
 		},
 	}
 	err := store.SaveProfile("Bob", "test.profile.json", profile)
@@ -112,8 +112,8 @@ func TestStore_SaveProfile(t *testing.T) {
 	}
 	var loaded types.SpeakerProfile
 	json.Unmarshal(data, &loaded)
-	if len(loaded.Embeddings) != 1 {
-		t.Errorf("expected 1 embedding, got %d", len(loaded.Embeddings))
+	if len(loaded.Voiceprints) != 1 {
+		t.Errorf("expected 1 voiceprint, got %d", len(loaded.Voiceprints))
 	}
 }
 
@@ -184,8 +184,8 @@ func TestStore_FindNewAudioFiles_AllKnown(t *testing.T) {
 	hash, _ := FileHash(audioPath)
 	profile := types.SpeakerProfile{
 		KnownAudioHashes: []string{hash},
-		Embeddings: []types.SampleEmbedding{
-			{Source: "sample.wav", Embedding: []float32{1, 0, 0}},
+		Voiceprints: []types.Voiceprint{
+			{Source: "sample.wav", Vector: []float32{1, 0, 0}},
 		},
 	}
 	data, _ := json.MarshalIndent(profile, "", "  ")

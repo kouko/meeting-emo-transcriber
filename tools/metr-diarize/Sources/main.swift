@@ -1,3 +1,4 @@
+import CoreML
 import FluidAudio
 import Foundation
 
@@ -8,24 +9,29 @@ struct MetrDiarize {
 
         guard args.count >= 2 else {
             log("Usage: metr-diarize <audio.wav> [--threshold <float>] [--num-speakers <int>]")
-            log("       metr-diarize --extract-embeddings <file1.wav> [file2.wav ...]")
+            log("       metr-diarize --extract-voiceprints <file1.wav> [file2.wav ...]")
             exit(1)
         }
 
-        // Mode: batch extract embeddings (for enroll)
-        if let idx = args.firstIndex(of: "--extract-embeddings") {
+        // Mode: batch extract voiceprints (for enroll)
+        if let idx = args.firstIndex(of: "--extract-voiceprints") {
             let wavFiles = Array(args[(idx + 1)...])
             guard !wavFiles.isEmpty else {
-                log("Error: --extract-embeddings requires at least one audio file")
+                log("Error: --extract-voiceprints requires at least one audio file")
                 exit(1)
             }
-            await extractEmbeddings(audioPaths: wavFiles)
+            await extractVoiceprints(audioPaths: wavFiles)
             return
         }
 
-        // Mode: single extract embedding (backward compat)
+        // Mode: backward compat aliases
+        if let idx = args.firstIndex(of: "--extract-embeddings") {
+            let wavFiles = Array(args[(idx + 1)...])
+            await extractVoiceprints(audioPaths: wavFiles)
+            return
+        }
         if let idx = args.firstIndex(of: "--extract-embedding"), idx + 1 < args.count {
-            await extractEmbeddings(audioPaths: [args[idx + 1]])
+            await extractVoiceprints(audioPaths: [args[idx + 1]])
             return
         }
 
@@ -35,7 +41,8 @@ struct MetrDiarize {
         let numSpeakers = parseInt(flag: "--num-speakers", default: 0)
 
         do {
-            let (diarizer, _) = try await loadDiarizer(threshold: threshold, numSpeakers: numSpeakers)
+            let (diarizer, models) = try await loadDiarizer(threshold: threshold, numSpeakers: numSpeakers)
+            let plda = PLDATransform(pldaRhoModel: models.pldaRhoModel, psi: models.pldaPsi)
 
             log("Running diarization...")
             let url = URL(fileURLWithPath: audioPath)
@@ -53,18 +60,19 @@ struct MetrDiarize {
                 ]
             }
 
-            // Build speaker embeddings (centroid per speaker)
-            var speakerEmbeddings: [String: [Double]] = [:]
+            // Build speaker voiceprints (PLDA rho vectors per speaker)
+            var speakerVoiceprints: [String: [Double]] = [:]
             if let db = result.speakerDatabase {
                 for (speakerId, embedding) in db {
-                    speakerEmbeddings[speakerId] = embedding.map { Double($0) }
+                    let rho = try await plda.transform(embedding)
+                    speakerVoiceprints[speakerId] = rho
                 }
             }
 
             let json: [String: Any] = [
                 "segments": segments,
                 "speakers": speakerCount,
-                "speaker_embeddings": speakerEmbeddings,
+                "speaker_voiceprints": speakerVoiceprints,
             ]
             let data = try JSONSerialization.data(withJSONObject: json, options: [.prettyPrinted, .sortedKeys])
             FileHandle.standardOutput.write(data)
@@ -76,35 +84,42 @@ struct MetrDiarize {
         }
     }
 
-    // MARK: - Batch Extract Embeddings Mode
+    // MARK: - Batch Extract Voiceprints Mode
 
-    static func extractEmbeddings(audioPaths: [String]) async {
+    static func extractVoiceprints(audioPaths: [String]) async {
         do {
-            // Load model ONCE for all files
-            let (diarizer, _) = try await loadDiarizer(threshold: 0.6, numSpeakers: 1)
+            let (diarizer, models) = try await loadDiarizer(threshold: 0.6, numSpeakers: 1)
+            let plda = PLDATransform(pldaRhoModel: models.pldaRhoModel, psi: models.pldaPsi)
 
             var results: [[String: Any]] = []
             for audioPath in audioPaths {
-                log("Extracting embedding: \(audioPath)...")
+                log("Extracting voiceprint: \(audioPath)...")
                 let url = URL(fileURLWithPath: audioPath)
                 let result = try await diarizer.process(url)
 
                 guard let db = result.speakerDatabase, let firstEntry = db.first else {
-                    log("Warning: no embedding extracted for \(audioPath)")
-                    results.append(["file": audioPath, "embedding": [] as [Double], "dim": 0, "model": "wespeaker_v2"])
+                    log("Warning: no voiceprint extracted for \(audioPath)")
+                    results.append([
+                        "file": audioPath,
+                        "vector": [] as [Double],
+                        "dim": 0,
+                        "model": "wespeaker_v2",
+                        "projection": "none",
+                    ])
                     continue
                 }
 
-                let embedding = firstEntry.value.map { Double($0) }
+                let rho = try await plda.transform(firstEntry.value)
                 results.append([
                     "file": audioPath,
-                    "embedding": embedding,
-                    "dim": embedding.count,
+                    "vector": rho,
+                    "dim": rho.count,
                     "model": "wespeaker_v2",
+                    "projection": "plda_pyannote_community_1",
                 ])
             }
 
-            log("\(results.count) embeddings extracted")
+            log("\(results.count) voiceprints extracted")
 
             let data = try JSONSerialization.data(withJSONObject: results, options: [.prettyPrinted, .sortedKeys])
             FileHandle.standardOutput.write(data)

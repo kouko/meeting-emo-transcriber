@@ -27,8 +27,8 @@ type MaxSimilarityStrategy struct{}
 
 func (s *MaxSimilarityStrategy) Score(segmentEmb []float32, profile types.SpeakerProfile) float32 {
 	var maxSim float32 = -1
-	for _, sample := range profile.Embeddings {
-		sim := CosineSimilarity(segmentEmb, sample.Embedding)
+	for _, sample := range profile.Voiceprints {
+		sim := CosineSimilarity(segmentEmb, sample.Vector)
 		if sim > maxSim {
 			maxSim = sim
 		}

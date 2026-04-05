@@ -116,14 +116,14 @@ func newTranscribeCmd() *cobra.Command {
 
 			// Auto-enroll: batch extract embeddings using FluidAudio WeSpeaker (model loaded once)
 			batchExtractFn := func(wavPaths []string) ([][]float32, error) {
-				results, err := diarize.ExtractEmbeddings(bins.Diarize, wavPaths)
+				results, err := diarize.ExtractVoiceprints(bins.Diarize, wavPaths)
 				if err != nil {
 					return nil, err
 				}
 				out := make([][]float32, len(results))
 				for i, r := range results {
-					emb := make([]float32, len(r.Embedding))
-					for j, v := range r.Embedding {
+					emb := make([]float32, len(r.Vector))
+					for j, v := range r.Vector {
 						emb[j] = float32(v)
 					}
 					out[i] = emb

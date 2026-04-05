@@ -18,11 +18,11 @@ type Segment struct {
 	Speaker string  `json:"speaker"`
 }
 
-// DiarizeResult contains diarization segments and per-speaker embeddings.
+// DiarizeResult contains diarization segments and per-speaker voiceprints.
 type DiarizeResult struct {
-	Segments          []Segment              `json:"segments"`
-	Speakers          int                    `json:"speakers"`
-	SpeakerEmbeddings map[string][]float64   `json:"speaker_embeddings"`
+	Segments            []Segment            `json:"segments"`
+	Speakers            int                  `json:"speakers"`
+	SpeakerVoiceprints  map[string][]float64 `json:"speaker_voiceprints"`
 }
 
 // Process runs speaker diarization on a WAV file using metr-diarize CLI.
@@ -50,42 +50,42 @@ func Process(binPath, wavPath string, threshold float32, numSpeakers int) (*Diar
 	return &result, nil
 }
 
-// EmbeddingResult is the JSON output from metr-diarize --extract-embeddings.
-type EmbeddingResult struct {
-	File      string    `json:"file"`
-	Embedding []float64 `json:"embedding"`
-	Dim       int       `json:"dim"`
-	Model     string    `json:"model"`
+// VoiceprintResult is the JSON output from metr-diarize --extract-voiceprints.
+type VoiceprintResult struct {
+	File   string    `json:"file"`
+	Vector []float64 `json:"vector"`
+	Dim    int       `json:"dim"`
+	Model  string    `json:"model"`
 }
 
-// ExtractEmbedding runs metr-diarize in embedding extraction mode for a single file.
-func ExtractEmbedding(binPath, wavPath string) (*EmbeddingResult, error) {
-	results, err := ExtractEmbeddings(binPath, []string{wavPath})
+// ExtractVoiceprint runs metr-diarize in voiceprint extraction mode for a single file.
+func ExtractVoiceprint(binPath, wavPath string) (*VoiceprintResult, error) {
+	results, err := ExtractVoiceprints(binPath, []string{wavPath})
 	if err != nil {
 		return nil, err
 	}
 	if len(results) == 0 {
-		return nil, fmt.Errorf("no embedding extracted")
+		return nil, fmt.Errorf("no voiceprint extracted")
 	}
 	return &results[0], nil
 }
 
-// ExtractEmbeddings runs metr-diarize in batch embedding extraction mode.
-// Loads the model once for all files. Much faster than calling ExtractEmbedding per file.
-func ExtractEmbeddings(binPath string, wavPaths []string) ([]EmbeddingResult, error) {
-	args := append([]string{"--extract-embeddings"}, wavPaths...)
+// ExtractVoiceprints runs metr-diarize in batch voiceprint extraction mode.
+// Loads the model once for all files. Much faster than calling ExtractVoiceprint per file.
+func ExtractVoiceprints(binPath string, wavPaths []string) ([]VoiceprintResult, error) {
+	args := append([]string{"--extract-voiceprints"}, wavPaths...)
 	cmd := exec.Command(binPath, args...)
 	var stdout bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = os.Stderr
 
 	if err := cmd.Run(); err != nil {
-		return nil, fmt.Errorf("metr-diarize extract-embeddings failed: %w", err)
+		return nil, fmt.Errorf("metr-diarize extract-voiceprints failed: %w", err)
 	}
 
-	var results []EmbeddingResult
+	var results []VoiceprintResult
 	if err := json.Unmarshal(stdout.Bytes(), &results); err != nil {
-		return nil, fmt.Errorf("parse embeddings output: %w", err)
+		return nil, fmt.Errorf("parse voiceprints output: %w", err)
 	}
 
 	return results, nil

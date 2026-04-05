@@ -37,24 +37,25 @@ type Metadata struct {
 	Date               string `json:"date"`
 }
 
-// SpeakerProfile stores speaker embeddings from one or more sources.
+// SpeakerProfile stores speaker voiceprints from one or more sources.
 // Multiple *.profile.json files in a speaker directory are merged on load.
 type SpeakerProfile struct {
-	Name             string            `json:"-"`                        // speaker directory name (not stored in JSON)
-	CreatedAt        string            `json:"created_at"`               // first created
-	UpdatedAt        string            `json:"updated_at"`               // last modified
-	KnownAudioHashes []string          `json:"known_audio_hashes"`       // hashes of auto-generated wav files
-	Embeddings       []SampleEmbedding `json:"embeddings"`               // one or more embeddings from different sources
+	Name             string       `json:"-"`                  // speaker directory name (not stored in JSON)
+	CreatedAt        string       `json:"created_at"`         // first created
+	UpdatedAt        string       `json:"updated_at"`         // last modified
+	KnownAudioHashes []string    `json:"known_audio_hashes"` // hashes of auto-generated wav files
+	Voiceprints      []Voiceprint `json:"voiceprints"`        // one or more voiceprints from different sources
 }
 
-// SampleEmbedding is a single embedding with its provenance metadata.
-type SampleEmbedding struct {
-	Source    string    `json:"source"`     // source audio file name (e.g., "20260320 1401 Recording.mp3")
-	CreatedAt string   `json:"created_at"` // when this embedding was computed
-	Dim       int      `json:"dim"`        // embedding dimension (256 for WeSpeaker v2)
-	Model     string   `json:"model"`      // model used (e.g., "wespeaker_v2")
-	Type      string   `json:"type"`       // "centroid" (from diarization) or "extracted" (from single wav)
-	Embedding []float32 `json:"embedding"` // the embedding vector
+// Voiceprint is a speaker identity vector with its provenance metadata.
+type Voiceprint struct {
+	Source     string    `json:"source"`     // source audio file name
+	CreatedAt  string   `json:"created_at"` // when this voiceprint was computed
+	Dim        int      `json:"dim"`        // vector dimension (128 for PLDA rho)
+	Model      string   `json:"model"`      // embedding model (e.g., "wespeaker_v2")
+	Projection string   `json:"projection"` // projection method (e.g., "plda_pyannote_community_1")
+	Type       string   `json:"type"`       // "centroid" (from diarization) or "extracted" (from single wav)
+	Vector     []float32 `json:"vector"`    // the voiceprint vector (PLDA rho space)
 }
 
 type MatchResult struct {

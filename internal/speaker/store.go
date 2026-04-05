@@ -66,7 +66,7 @@ func (s *Store) LoadProfiles() ([]types.SpeakerProfile, error) {
 		if err != nil {
 			return nil, err
 		}
-		if p != nil && len(p.Embeddings) > 0 {
+		if p != nil && len(p.Voiceprints) > 0 {
 			profiles = append(profiles, *p)
 		}
 	}
@@ -108,8 +108,8 @@ func (s *Store) LoadProfile(name string) (*types.SpeakerProfile, error) {
 			return nil, err
 		}
 
-		// Merge embeddings
-		merged.Embeddings = append(merged.Embeddings, p.Embeddings...)
+		// Merge voiceprints
+		merged.Voiceprints = append(merged.Voiceprints, p.Voiceprints...)
 
 		// Merge known audio hashes
 		merged.KnownAudioHashes = append(merged.KnownAudioHashes, p.KnownAudioHashes...)
