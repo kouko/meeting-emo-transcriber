@@ -26,8 +26,8 @@
 
 | 約束 | 說明 |
 |------|------|
-| 語言 | Go 1.22+，允許 cgo |
-| 部署 | 單一 Binary（go:embed 嵌入所有依賴）+ 模型檔（首次執行自動下載） |
+| 語言 | Go 1.25+（主 CLI，允許 cgo）+ Swift 6.0（metr-diarize） |
+| 部署 | 單一 Binary（embed.FS 嵌入所有依賴，無 build tag）+ 模型檔（首次執行自動下載） |
 | 處理模式 | 離線批次 |
 | 隱私 | 全程本地運算，不上傳雲端 |
 
@@ -35,50 +35,54 @@
 
 ## 2. 技術架構
 
-### 方案：元件組合式（Component-based）+ go:embed 單一 Binary
+### 方案：元件組合式（Component-based）+ embed.FS 單一 Binary
 
-追求各模組最高精度。採用 `go:embed` 將所有外部依賴嵌入 Go Binary，使用者只需要一個執行檔 + 模型檔案。
+追求各模組最高精度。採用 `embed.FS`（Go 標準庫，無需 build tag）將所有外部依賴嵌入 Go Binary，使用者只需要一個執行檔 + 模型檔案。
 
 ### 打包策略
 
-參考 `youtube-summarize-scraper` 專案的做法：
-
-- **whisper.cpp**：編譯為獨立 CLI Binary → `go:embed` 嵌入 Go Binary → 執行時解壓到快取目錄 → 透過 `os/exec` 子程序呼叫
-- **libonnxruntime.dylib**：`go:embed` 嵌入 Go Binary → 執行時解壓到快取目錄 → `onnxruntime_go` 透過 dlopen 載入
-- **效果**：使用者拿到的是**單一 Go Binary**，首次執行時自動解壓內嵌的依賴到 `~/.meeting-emo-transcriber/bin/`
+- **whisper-cli**：編譯為獨立 CLI Binary → `embed.FS` 嵌入 Go Binary → 執行時解壓到 `~/.metr/bin/` → 透過 `os/exec` 子程序呼叫
+- **ffmpeg**：同上，用於音訊格式轉換
+- **metr-diarize**：Swift 6.0 CLI（FluidAudio CoreML/ANE）→ `embed.FS` 嵌入 → 執行時解壓到 `~/.metr/bin/` → 透過 `os/exec` 子程序呼叫
+- **效果**：使用者拿到的是**單一 Go Binary**，首次執行時自動解壓內嵌的依賴到 `~/.metr/bin/`
 
 ```
-┌──────────────────────────────────────────────────────────┐
-│                   Go Binary (Mach-O)                      │
-│                                                            │
-│  ┌──────────────────────────────────────────────────┐     │
-│  │  go:embed（嵌入的外部依賴）                         │     │
-│  │                                                    │     │
-│  │  whisper-cli    ffmpeg    libonnxruntime.dylib      │     │
-│  │  (ASR+VAD)     (音訊轉換)  (ONNX Runtime)           │     │
-│  └──────────┬─────────────────────┬───────────────────┘     │
-│             │ 執行時解壓到                │ 執行時解壓到          │
-│             │ ~/.meeting-emo-             │ ~/.meeting-emo-     │
-│             │   transcriber/bin/          │   transcriber/bin/  │
-│             ▼                             ▼                    │
-│  ┌──────────────────┐  ┌──────────────────────────────┐     │
-│  │  os/exec 子程序   │  │      onnxruntime-go          │     │
-│  │  whisper-cli      │  │      (dlopen dylib)          │     │
-│  │                   │  │                              │     │
-│  │  ASR + VAD        │  │  CAM++ ONNX   SenseVoice    │     │
-│  │  (Metal GPU)      │  │  (Speaker)    (SER)          │     │
-│  └──────────────────┘  └──────────────────────────────┘     │
-└──────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────┐
+│                     metr (Go Binary, Mach-O)                  │
+│                                                                │
+│  ┌──────────────────────────────────────────────────────┐     │
+│  │  embed.FS（嵌入的外部依賴，無 build tag）               │     │
+│  │                                                        │     │
+│  │  whisper-cli    ffmpeg    metr-diarize                  │     │
+│  │  (ASR+VAD)     (音訊轉換)  (FluidAudio Swift CLI)       │     │
+│  └───────┬─────────────┬─────────────┬─────────────────── ┘     │
+│          │             │             │ 執行時解壓到 ~/.metr/bin/  │
+│          ▼             ▼             ▼                           │
+│  ┌───────────┐  ┌──────────┐  ┌────────────────────────┐       │
+│  │ os/exec   │  │ os/exec  │  │      os/exec           │       │
+│  │whisper-cli│  │  ffmpeg  │  │   metr-diarize         │       │
+│  │ ASR + VAD │  │  WAV 轉換 │  │ FluidAudio CoreML/ANE  │       │
+│  │(Metal GPU)│  │          │  │ 說話者分離              │       │
+│  └───────────┘  └──────────┘  └────────────────────────┘       │
+│                                                                  │
+│  ┌──────────────────────────────────────────────────────┐       │
+│  │  sherpa-onnx-go-macos (cgo, in-process)               │       │
+│  │  CAM++ 192d (Speaker Embedding + Matching)             │       │
+│  │  SenseVoice-Small int8 (Emotion + Audio Event)         │       │
+│  └──────────────────────────────────────────────────────┘       │
+└──────────────────────────────────────────────────────────────┘
 ```
 
 ### 快取目錄結構
 
 ```
-~/.meeting-emo-transcriber/
-└── bin/
-    ├── whisper-cli              # whisper.cpp CLI Binary
-    ├── ffmpeg                   # 音訊格式轉換
-    └── libonnxruntime.dylib     # ONNX Runtime 動態庫
+~/.metr/
+├── bin/
+│   ├── whisper-cli              # whisper.cpp CLI Binary
+│   ├── ffmpeg                   # 音訊格式轉換
+│   └── metr-diarize             # FluidAudio Swift CLI
+└── models/
+    └── diarization/             # FluidAudio 使用的 CoreML 模型（自動下載）
 ```
 
 首次執行時解壓嵌入的 Binary 到快取目錄。後續啟動時檢查檔案 hash，若一致則直接使用快取。
@@ -87,18 +91,18 @@
 
 | 元件 | 選型 | 角色 | 整合方式 |
 |------|------|------|---------|
-| ASR（預設） | whisper.cpp CLI + Whisper Large-v3 (GGML) | 語音轉文字 + Metal GPU 加速 | `go:embed` + `os/exec` 子程序 |
+| ASR（預設） | whisper.cpp CLI + Whisper Large-v3 (GGML) | 語音轉文字 + Metal GPU 加速 | `embed.FS` + `os/exec` 子程序 |
 | ASR（台灣中文推薦） | whisper.cpp CLI + Breeze ASR 25 (GGML) | 台灣口音 + 繁體直出 + 中英混合 | 同上，僅切換模型檔案 |
-| Speaker Embedding | CAM++ zh-cn (ONNX, 512d) | 聲紋向量提取 | `yalue/onnxruntime_go`（dlopen 嵌入的 dylib） |
-| SER（預設） | SenseVoice-Small (ONNX int8, 最多 7 類+unk) | 情感辨識 | `yalue/onnxruntime_go`（同上，~66MB） |
-| SER（可選） | Emotion2vec+ Large (ONNX, 9-class) | 情感辨識（高精度） | `yalue/onnxruntime_go`（需自行轉換，~300MB） |
-| VAD | whisper.cpp 內建 | 語音活動偵測 | 同 ASR（whisper CLI 參數控制） |
-| 音訊轉換 | ffmpeg CLI | MP3/M4A/FLAC → WAV 16kHz mono | `go:embed` + `os/exec` 子程序 |
+| 說話者分離 | FluidAudio + metr-diarize (Swift 6.0 CLI) | CoreML/ANE 加速說話者分離 | `embed.FS` + `os/exec` 子程序 |
+| Speaker Embedding | CAM++ zh-cn (ONNX, 192d) | 聲紋向量提取 + 身份比對 | `sherpa-onnx-go-macos`（cgo, in-process） |
+| SER（預設） | SenseVoice-Small (ONNX int8, 最多 7 類+unk) | 情感辨識 | `sherpa-onnx-go-macos`（cgo, in-process，~228MB tar.bz2） |
+| VAD | silero-vad v6.2.0 | 語音活動偵測 | whisper CLI 參數控制 |
+| 音訊轉換 | ffmpeg CLI | MP3/M4A/FLAC → WAV 16kHz mono | `embed.FS` + `os/exec` 子程序 |
 | 音訊 I/O | `go-audio/wav` | 讀取 WAV PCM | pure Go |
 | 向量運算 | `gonum` | Cosine similarity | pure Go |
 | Config | `spf13/viper` | YAML 設定檔 | pure Go |
 | CLI | `spf13/cobra` | 命令列介面 | pure Go |
-| 嵌入 | `embed` (標準庫) | 嵌入 whisper CLI + dylib | pure Go |
+| 嵌入 | `embed.FS` (標準庫) | 嵌入 3 個 CLI Binary（無 build tag） | pure Go |
 
 ---
 
@@ -109,16 +113,14 @@ meeting-emo-transcriber/
 ├── cmd/
 │   └── main.go                  # CLI 入口
 ├── embedded/
-│   ├── embedded.go              # go:embed 宣告 + 執行時解壓邏輯
+│   ├── embedded.go              # embed.FS 宣告 + 執行時解壓邏輯（無 build tag）
 │   └── binaries/                # 預編譯的平台 Binary（.gitignore, build 時產生）
-│       ├── darwin-arm64/
-│       │   ├── whisper-cli      # whisper.cpp CLI Binary
-│       │   ├── ffmpeg           # 音訊格式轉換
-│       │   └── libonnxruntime.dylib
-│       └── darwin-amd64/        # Intel Mac 支援（選用）
-│           ├── whisper-cli
-│           ├── ffmpeg
-│           └── libonnxruntime.dylib
+│       └── darwin-arm64/
+│           ├── whisper-cli      # whisper.cpp CLI Binary
+│           ├── ffmpeg           # 音訊格式轉換
+│           └── metr-diarize     # FluidAudio Swift CLI
+├── tools/
+│   └── metr-diarize/            # Swift 6.0 CLI 原始碼（FluidAudio 說話者分離）
 ├── internal/
 │   ├── config/
 │   │   └── config.go            # YAML 設定載入
@@ -127,7 +129,9 @@ meeting-emo-transcriber/
 │   ├── vad/
 │   │   └── vad.go               # VAD 語音切割（whisper.cpp 內建 VAD 參數）
 │   ├── asr/
-│   │   └── asr.go               # whisper.cpp 子程序呼叫封裝
+│   │   └── asr.go               # whisper.cpp 子程序呼叫封裝 + SRT 快取
+│   ├── diarize/
+│   │   └── diarize.go           # metr-diarize 子程序呼叫封裝（FluidAudio）
 │   ├── speaker/
 │   │   ├── extractor.go         # CAM++ Embedding 提取（onnxruntime-go）
 │   │   ├── matcher.go           # Cosine similarity 比對
@@ -173,7 +177,7 @@ meeting-emo-transcriber/
 
 | 層級 | 位置 | 內容 | 可攜？ |
 |------|------|------|--------|
-| **全局** | `~/.meeting-emo-transcriber/` | `bin/`（whisper-cli + dylib）+ `models/`（3.1GB） | 否，安裝一次共用 |
+| **全局** | `~/.metr/` | `bin/`（whisper-cli + ffmpeg + metr-diarize）+ `models/`（ASR + Speaker + Emotion + Diarization） | 否，安裝一次共用 |
 | **可攜** | `./speakers/` | 聲紋 + config.yaml + .profile.json | **是**，整個複製即用 |
 | **輸出** | `./output/` | 轉錄結果 | 使用者自行管理 |
 
@@ -400,141 +404,76 @@ type Pipeline interface {
 
 ## 6. 處理管線
 
+### 8 階段管線（雙路平行）
+
 ```
-會議音檔 (WAV/MP3)
-       │
-       ▼
-  ┌──────────────┐
-  │ Auto-Enroll  │  掃描 speakers/ 資料夾
-  │              │  檢查 .profile.json 快取是否過期
-  │              │  有變更 → 重新計算 embedding（via onnxruntime-go）
-  │              │  無變更 → 使用快取
-  └──────┬───────┘
-         │ []SpeakerProfile
-         ▼
-  ┌──────────────┐
-  │ 音訊前處理    │  讀取 → 轉 16kHz mono WAV（暫存檔）
-  └──────┬───────┘
-         │ tempAudio.wav
+會議音檔 (WAV/MP3/M4A/...)
+         │
          ▼
   ┌──────────────────────────────────────────────┐
-  │ whisper-cli 子程序                             │
-  │ exec.Command(whisperPath, -m, -f, -osrt, ...) │
-  │ 一次完成 VAD + ASR                             │
-  │ 輸出: SRT 檔案（帶時間戳的文字片段）              │
+  │ [1/8] 解壓嵌入 Binary                          │
+  │  embedded.ExtractAll()                         │
+  │  → ~/.metr/bin/{whisper-cli, ffmpeg, metr-diarize} │
   └──────────────────┬───────────────────────────┘
-                     │ 解析 SRT → []ASRResult
-                     ▼
-  ┌─────────────────────────────────────┐
-  │ 對每個 ASRResult 的時間區間：          │
-  │                                      │
-  │   根據時間戳從原始音訊切出片段           │
-  │         │                            │
-  │    ┌────┴─────┐   ┌──────────────┐  │
-  │    │ Speaker  │   │  Emotion     │  │
-  │    │ CAM++    │   │ SenseVoice  │  │
-  │    │ (ONNX)   │   │ (ONNX)      │  │
-  │    │→ embed   │   │→ label      │  │
-  │    └────┬─────┘   └──────┬───────┘  │
-  │         │                │          │
-  │    ┌────┴─────┐          │          │
-  │    │ Matcher  │          │          │
-  │    │→ name    │          │          │
-  │    └────┬─────┘          │          │
-  │         └────────┬───────┘          │
-  └──────────────────┼──────────────────┘
                      │
-                     ▼
-             ┌──────────────┐
-             │   Merge      │  合併 text + speaker + emotion
-             └──────┬───────┘
-                    │
-                    ▼
-             ┌──────────────┐
-             │   Output     │  JSON / TXT / SRT
-             └──────────────┘
+  ┌──────────────────▼───────────────────────────┐
+  │ [2/8] 確保 ASR 模型（依語言自動選擇）            │
+  │  models.EnsureASR()                            │
+  │  zh-TW→Breeze / zh→Belle / ja→Kotoba / *→Large-v3 │
+  └──────────────────┬───────────────────────────┘
+                     │
+  ┌──────────────────▼──────────────────────────┐
+  │ [3/8] 確保 VAD 模型                           │
+  │  models.EnsureVAD()  → silero-vad-v6.2.0     │
+  └──────────────────┬──────────────────────────┘
+                     │
+  ┌──────────────────▼──────────────────────────┐
+  │ [4/8] 音訊轉換                                │
+  │  audio.ConvertToWAV()                         │
+  │  ffmpeg → 16kHz mono WAV（暫存檔）             │
+  └──────────────────┬──────────────────────────┘
+                     │ tempAudio.wav
+           ┌─────────┴─────────┐
+           │                   │
+           ▼                   ▼
+  ┌────────────────┐  ┌───────────────────────────┐
+  │ [5/8] ASR      │  │ [6/8] 說話者分離（平行）      │
+  │ whisper-cli    │  │ metr-diarize subprocess   │
+  │ VAD + ASR      │  │ FluidAudio CoreML/ANE     │
+  │ → SRT（有快取）  │  │ → []DiarSegment           │
+  │   若 SRT 快取   │  │   {start, end, speaker_id}│
+  │   命中則跳過    │  └───────────────────────────┘
+  └────────┬───────┘          │
+           │ []ASRResult       │ []DiarSegment
+           └──────────┬────────┘
+                      │ 時間重疊合併
+                      ▼
+  ┌───────────────────────────────────────────┐
+  │ [7/8] 講者身份解析                          │
+  │  speaker.Resolve()                         │
+  │  CAM++ 192d embedding（sherpa-onnx-go）    │
+  │  vs. enrolled profiles（cosine similarity）│
+  │  + Auto-Enroll（若 profiles 有變更）        │
+  │  → speaker name per segment                │
+  └───────────────────┬───────────────────────┘
+                      │
+  ┌───────────────────▼───────────────────────┐
+  │ [8/8] 輸出                                 │
+  │  output.Format()                           │
+  │  TXT / JSON / SRT                          │
+  └───────────────────────────────────────────┘
 ```
 
 ### 處理步驟
 
-0. **Auto-Enroll**：掃描 `speakers/` 資料夾，檢查快取 → 載入所有 `SpeakerProfile`
-1. **音訊前處理**：讀取原始音檔 → ffmpeg 子程序轉換為 16kHz mono WAV 暫存檔（若已是 WAV 16kHz mono 則跳過）
-2. **ASR + VAD**（子程序）：呼叫 whisper-cli → 輸出 SRT → 解析為 `[]ASRResult`（帶時間戳文字）
-3. **對每個 ASRResult 的時間區間**（可用 goroutine 平行化）：
-   - **音訊切割**：根據 ASRResult 的 start/end 從原始音訊切出片段 → `[]float32`
-   - **Speaker Embedding**：CAM++ 提取 512d 向量（onnxruntime-go, in-process）
-   - **Speaker Matching**：與已註冊聲紋 cosine similarity 比對
-     - 若匹配成功 → 標註講者姓名
-     - 若未匹配（低於 threshold）→ **Unknown Speaker 自動發現**（見下方）
-   - **Emotion + Audio Event**：SenseVoice 辨識情緒 + 音訊事件標籤（onnxruntime-go, in-process）
-4. **合併**：將各模組結果合併為 `TranscriptSegment`（含 audio_event）
-5. **輸出**：依指定格式輸出
-
-### Unknown Speaker 自動發現
-
-轉錄過程中遇到未註冊的講者時，自動建立新的講者 profile：
-
-```
-Speaker Matching
-      │
-      ▼
-  similarity < threshold?
-      │
-      ├─ 否 → 標註已知講者姓名
-      │
-      └─ 是 → 與本次已發現的 unknown speakers 比對
-              │
-              ├─ 匹配某個 unknown → 歸入同一人（speaker_1）
-              │
-              └─ 都不匹配 → 建立新的 unknown speaker
-                            │
-                            ├─ 自動建立 speakers/speaker_N/
-                            ├─ 儲存該片段音訊為樣本
-                            └─ 產生 .profile.json
-```
-
-**行為細節**：
-
-1. **命名規則**：
-   - **啟用自動發現**（預設）：命名為 `speaker_1`、`speaker_2`...，建立資料夾並儲存樣本
-   - **停用自動發現**（`--no-discover`）：命名為 `Unknown_1`、`Unknown_2`...，僅在輸出中聚類區分，不建立資料夾
-2. **資料夾建立**：在 `speakers/` 下自動建立 `speaker_N/` 子資料夾
-3. **樣本儲存**：將該片段的音訊存為 `speakers/speaker_N/auto_segment_<timestamp>.wav`
-4. **Profile 產生**：自動計算 embedding 並寫入 `.profile.json`
-5. **跨片段聚類**：同一次轉錄中，後續片段會先與已發現的 unknown speakers 比對，確保同一人不會被拆成多個 speaker
-6. **持續學習**：下次轉錄時，這些自動發現的講者已在 speakers/ 中，會被正常載入
-7. **使用者重命名**：使用者只需將 `speakers/speaker_1/` 重新命名為 `speakers/CEO_Wang/`，後續轉錄即自動使用新名稱
-
-**輸出範例**（TXT 格式）：
-
-```
-CEO_Wang [happily]
-今天的季度數據非常亮眼
-
-speaker_1
-我來報告各部門的數字
-
-speaker_2 [angrily]
-B 事業部的問題還是沒有解決
-
-speaker_1
-我補充一下相關背景
-```
-
-轉錄完成後 speakers/ 的變化：
-
-```
-speakers/
-├── CEO_Wang/              ← 既有，正常匹配
-│   ├── office.wav
-│   └── .profile.json
-├── speaker_1/             ← 自動建立
-│   ├── auto_segment_0015.wav
-│   └── .profile.json
-└── speaker_2/             ← 自動建立
-    ├── auto_segment_0032.wav
-    └── .profile.json
-```
+1. **[1/8] 解壓嵌入 Binary**：首次執行時將 whisper-cli、ffmpeg、metr-diarize 解壓到 `~/.metr/bin/`；後續啟動比對 hash，一致則直接使用快取
+2. **[2/8] 確保 ASR 模型**：依 `--language` 自動選擇並下載對應 GGML 模型（首次執行時）
+3. **[3/8] 確保 VAD 模型**：確保 silero-vad-v6.2.0 已下載
+4. **[4/8] 音訊轉換**：ffmpeg 子程序將原始音檔轉為 16kHz mono WAV 暫存檔
+5. **[5/8] 語音辨識（含 SRT 快取）**：呼叫 whisper-cli → 輸出 SRT → 解析為 `[]ASRResult`。若相同音檔的 SRT 快取存在則跳過 Whisper，直接讀取快取
+6. **[6/8] 說話者分離（平行）**：呼叫 metr-diarize 子程序（FluidAudio CoreML/ANE 加速）→ 輸出 `[]DiarSegment{start, end, speaker_id}`
+7. **[7/8] 講者身份解析**：將 ASRResult 與 DiarSegment 依時間重疊合併；Auto-Enroll（若 profiles 有變更則先重新計算 embedding）；CAM++ 192d 向量比對 enrolled profiles，識別真實講者姓名
+8. **[8/8] 輸出**：依指定格式輸出 TXT / JSON / SRT
 
 ### 資料流跨程序邊界
 
@@ -596,46 +535,49 @@ vs Centroid（平均法）：
 
 ```bash
 # 最簡用法：當前目錄有 speakers/ 就自動偵測
-meeting-emo-transcriber transcribe --input meeting.wav
+metr transcribe --input meeting.wav
 # → 自動偵測 ./speakers/，輸出到 ./output/meeting.txt
 
 # 指定 speakers 資料夾
-meeting-emo-transcriber transcribe --input meeting.wav --speakers /path/to/my-speakers/
+metr transcribe --input meeting.wav --speakers /path/to/my-speakers/
 
 # 指定輸出格式
-meeting-emo-transcriber transcribe --input meeting.wav --format json
+metr transcribe --input meeting.wav --format json
 
 # 多格式同時輸出
-meeting-emo-transcriber transcribe --input meeting.wav --format txt,json,srt
+metr transcribe --input meeting.wav --format txt,json,srt
 
 # 全格式輸出
-meeting-emo-transcriber transcribe --input meeting.wav --format all
+metr transcribe --input meeting.wav --format all
 # → ./output/meeting.txt + ./output/meeting.json + ./output/meeting.srt
 
 # 多格式 + --output：自動替換副檔名
-meeting-emo-transcriber transcribe --input meeting.wav --format txt,json --output ~/Desktop/result.json
+metr transcribe --input meeting.wav --format txt,json --output ~/Desktop/result.json
 # → ~/Desktop/result.txt + ~/Desktop/result.json
 
+# 指定說話者數量（輔助 diarization）
+metr transcribe --input meeting.wav --num-speakers 3
+
 # 掃描 speakers/ 資料夾，預先註冊所有講者
-meeting-emo-transcriber enroll
+metr enroll
 
 # 強制重新計算（忽略快取）
-meeting-emo-transcriber enroll --force
+metr enroll --force
 
 # 列出已註冊聲紋
-meeting-emo-transcriber speakers list
+metr speakers list
 
 # 驗證辨識準確度
-meeting-emo-transcriber speakers verify --name CEO_Wang --audio test.wav
+metr speakers verify --name CEO_Wang --audio test.wav
 
 # 初始化工作目錄（選用，建立 speakers/ 和 output/ 資料夾）
-meeting-emo-transcriber init
+metr init
 ```
 
 ### 命令結構
 
 ```
-meeting-emo-transcriber
+metr
 ├── init            初始化工作目錄（建立 speakers/ + output/ + 範本 config.yaml）
 ├── enroll          掃描 speakers/ 資料夾，註冊所有講者
 │   --force         強制重新計算所有 embedding（忽略快取）
@@ -644,8 +586,8 @@ meeting-emo-transcriber
 │   --output        輸出檔案路徑（選填，預設 ./output/<input-name>.<format>）
 │   --format        輸出格式：txt | json | srt | all（預設 txt，可逗號分隔多值如 txt,json）
 │   --language      語言：auto | zh-TW | zh | en | ja（預設 auto）
-│   --threshold     Speaker 比對門檻（預設 0.6）
-│   --no-discover   停用自動發現（仍聚類為 Unknown_N，但不建立資料夾/不儲存樣本）
+│   --threshold     Speaker 比對門檻（預設 0.7）
+│   --num-speakers  預期說話者數量，0 表示自動偵測（預設 0）
 ├── speakers        聲紋管理
 │   ├── list        列出所有已註冊講者（名稱、樣本數、最後更新時間）
 │   └── verify      驗證辨識準確度
@@ -660,7 +602,7 @@ meeting-emo-transcriber
 ### enroll 輸出範例
 
 ```
-$ meeting-emo-transcriber enroll
+$ metr enroll
 
 Scanning speakers/...
   CEO_Wang:    3 samples → embedding computed ✓ (created)
@@ -668,7 +610,7 @@ Scanning speakers/...
 
 2 speakers enrolled.
 
-$ meeting-emo-transcriber enroll
+$ metr enroll
 
 Scanning speakers/...
   CEO_Wang:    3 samples → unchanged (cached)
@@ -680,10 +622,10 @@ Scanning speakers/...
 ### speakers verify 輸出範例
 
 ```
-$ meeting-emo-transcriber speakers verify --name CEO_Wang --audio test_wang.wav
+$ metr speakers verify --name CEO_Wang --audio test_wang.wav
 
 Verifying against CEO_Wang...
-  Similarity: 0.89 (threshold: 0.60)
+  Similarity: 0.89 (threshold: 0.70)
   Result: ✓ MATCH
 ```
 
@@ -730,10 +672,10 @@ Verifying against CEO_Wang...
 # speakers/config.yaml
 # 只需要列出想覆寫的參數，其餘用預設值
 
-language: "auto"          # auto | zh | en | ja
-threshold: 0.6            # Speaker 比對門檻
+language: "auto"          # auto | zh-TW | zh | en | ja
+threshold: 0.7            # Speaker 比對門檻
 format: txt               # 預設輸出格式
-discover: true            # 自動發現未知講者
+num_speakers: 0           # 預期說話者數量（0 = 自動偵測）
 ```
 
 ### 所有設定參數與預設值
@@ -741,14 +683,14 @@ discover: true            # 自動發現未知講者
 | 參數 | CLI flag | config key | 預設值 | 說明 |
 |------|----------|------------|--------|------|
 | 語言 | `--language` | `language` | `"auto"` | ASR 語言（影響自動模型選擇，見下方） |
-| 比對門檻 | `--threshold` | `threshold` | `0.6` | Speaker cosine similarity 門檻 |
+| 比對門檻 | `--threshold` | `threshold` | `0.7` | Speaker cosine similarity 門檻 |
 | 輸出格式 | `--format` | `format` | `"txt"` | txt / json / srt / all（可逗號分隔多值） |
+| 說話者數量 | `--num-speakers` | `num_speakers` | `0` | 預期說話者數量（0 = 自動偵測） |
 | ASR 模型 | — | `models.whisper` | （依 language 自動選擇） | 明確指定時覆蓋自動選擇 |
-| Speaker 模型 | — | `models.speaker` | `~/.meeting-emo-transcriber/models/campplus_sv_zh-cn.onnx` | CAM++ ONNX 模型路徑 |
-| Emotion 模型 | — | `models.emotion` | `~/.meeting-emo-transcriber/models/sensevoice-small-int8.onnx` | SER 模型路徑（預設 SenseVoice-Small int8） |
+| Speaker 模型 | — | `models.speaker` | `~/.metr/models/campplus_sv_zh-cn.onnx` | CAM++ ONNX 模型路徑 |
+| Emotion 模型 | — | `models.emotion` | `~/.metr/models/sensevoice-small-int8/` | SER 模型路徑（預設 SenseVoice-Small int8） |
 | 執行緒數 | — | `threads` | CPU 核心數 | ONNX Runtime + whisper 執行緒 |
 | 比對策略 | — | `strategy` | `"max_similarity"` | max_similarity / centroid |
-| 自動發現 | `--no-discover` | `discover` | `true` | 是否自動發現未知講者 |
 | 日誌等級 | `--log-level` | — | `"info"` | debug / info / warn / error |
 
 ### ASR 模型自動選擇邏輯
@@ -768,7 +710,7 @@ discover: true            # 自動發現未知講者
 
 ### 模型下載來源
 
-所有模型首次使用時自動從 HuggingFace 下載到 `~/.meeting-emo-transcriber/models/`：
+所有模型首次使用時自動從 HuggingFace 下載到 `~/.metr/models/`：
 
 ```yaml
 # 內建的模型下載 URL 對應（硬編碼）
@@ -779,7 +721,7 @@ model_sources:
   kotoba-ja: "https://huggingface.co/kotoba-tech/kotoba-whisper-v2.0-ggml/resolve/main/ggml-model.bin"
 ```
 
-> **注意**：模型路徑等技術參數通常不需要在 config.yaml 中設定。全局目錄 `~/.meeting-emo-transcriber/models/` 是預設的模型位置，只有在非標準安裝時才需要覆寫。
+> **注意**：模型路徑等技術參數通常不需要在 config.yaml 中設定。全局目錄 `~/.metr/models/` 是預設的模型位置，只有在非標準安裝時才需要覆寫。
 
 ---
 
@@ -938,12 +880,12 @@ speaker_1 [angrily]
 使用者不需要手動下載模型。Binary 首次執行時自動從網路下載到全局目錄：
 
 ```
-$ meeting-emo-transcriber transcribe --input meeting.wav
+$ metr transcribe --input meeting.wav
 
-Models not found. Downloading to ~/.meeting-emo-transcriber/models/...
-  ggml-large-v3.bin          [████████████████████] 3.0GB ✓
-  campplus_sv_zh-cn.onnx     [████████████████████]  30MB ✓
-  sensevoice-small-int8.onnx [████████████████████]  66MB ✓
+Models not found. Downloading to ~/.metr/models/...
+  ggml-large-v3.bin              [████████████████████] 3.0GB ✓
+  campplus_sv_zh-cn.onnx         [████████████████████]  28MB ✓
+  sensevoice-small-int8.tar.bz2  [████████████████████] 228MB ✓
 
 All models ready. Starting transcription...
 ```
@@ -956,9 +898,10 @@ All models ready. Starting transcription...
 | Breeze ASR 25 | ~1GB (q5_k) | GGML | HuggingFace（社群轉換） | ✓ 現成（`zh-TW` 自動選擇） |
 | Belle-whisper-large-v3-turbo-zh | ~1.5GB | GGML | HuggingFace（BELLE-2） | ✓ 現成（`zh` 自動選擇） |
 | kotoba-whisper-v2.0 | ~1.4GB | GGML | HuggingFace（kotoba-tech） | ✓ 現成（`ja` 自動選擇） |
-| CAM++ zh-cn | ~30MB | ONNX | GitHub（sherpa-onnx releases） | ✓ 現成可下載 |
-| SenseVoice-Small (int8) | ~66MB | ONNX | sherpa-onnx releases | ✓ 現成可下載（**預設 SER**） |
+| CAM++ zh-cn | ~28MB | ONNX | GitHub（sherpa-onnx releases） | ✓ 現成可下載（192-dim） |
+| SenseVoice-Small (int8) | ~228MB tar.bz2 | ONNX | sherpa-onnx releases | ✓ 現成可下載（**預設 SER**） |
 | Emotion2vec+ Large | ~300MB | ONNX | 需自行轉換後上傳 | ⚠ 可選 SER，見下方風險說明 |
+| Diarization (FluidAudio) | — | CoreML | ~/.metr/models/diarization/（自動下載） | ✓ metr-diarize 管理 |
 
 ### Whisper Large-v3 (GGML) — 現成可下載
 
@@ -1074,37 +1017,61 @@ python -c "import onnxruntime; sess = onnxruntime.InferenceSession('emotion2vec_
 ### 全局模型目錄
 
 ```
-~/.meeting-emo-transcriber/
+~/.metr/
 ├── bin/
-│   ├── whisper-cli
-│   ├── ffmpeg
-│   └── libonnxruntime.dylib
+│   ├── whisper-cli                    # whisper.cpp CLI Binary
+│   ├── ffmpeg                         # 音訊格式轉換
+│   └── metr-diarize                   # FluidAudio Swift CLI
 └── models/
-    ├── ggml-large-v3.bin              # Whisper (~3GB)
-    ├── campplus_sv_zh-cn.onnx         # CAM++ (~30MB)
-    └── sensevoice-small-int8.onnx     # SenseVoice-Small int8 (~66MB, 預設 SER)
+    ├── ggml-large-v3.bin              # Whisper (~3GB, auto/en 預設)
+    ├── ggml-breeze-asr-25-q5k.bin     # Breeze ASR 25 (~1GB, zh-TW)
+    ├── ggml-belle-zh.bin              # Belle-whisper (~1.5GB, zh)
+    ├── ggml-kotoba-whisper-v2.0.bin   # kotoba-whisper (~1.4GB, ja)
+    ├── silero-vad-v6.2.0.onnx         # VAD
+    ├── campplus_sv_zh-cn.onnx         # CAM++ (~28MB, 192-dim)
+    ├── sensevoice-small-int8/         # SenseVoice-Small int8 (~228MB tar.bz2, 預設 SER)
+    └── diarization/                   # FluidAudio CoreML 模型（metr-diarize 管理）
 ```
 
 ---
 
 ## 11. 編譯與打包
 
-### 編譯流程總覽
+### 編譯流程總覽（Makefile 驅動）
 
 ```
-Step 1: 編譯 whisper.cpp CLI        Step 2: 下載 libonnxruntime.dylib
-  scripts/build-whisper.sh            從 GitHub releases 下載
-  → embedded/binaries/                → embedded/binaries/
-    darwin-arm64/whisper-cli            darwin-arm64/libonnxruntime.dylib
+Step 1: 編譯 metr-diarize Swift CLI
+  make swift
+  cd tools/metr-diarize && swift build -c release
+  → embedded/binaries/darwin-arm64/metr-diarize
 
-                    ↓ 兩者就位後 ↓
+Step 2: 編譯 whisper.cpp CLI
+  make whisper
+  scripts/build-whisper.sh
+  → embedded/binaries/darwin-arm64/whisper-cli
 
-Step 3: 編譯 Go Binary（go:embed 自動嵌入）
-  go build → meeting-emo-transcriber
-  內含 whisper-cli + libonnxruntime.dylib
+Step 3: 取得 ffmpeg
+  make ffmpeg
+  → embedded/binaries/darwin-arm64/ffmpeg
+
+                    ↓ 三者就位後 ↓
+
+Step 4: 編譯 Go Binary（embed.FS 自動嵌入，無 build tag）
+  make build
+  go build → metr
+  內含 whisper-cli + ffmpeg + metr-diarize
 ```
 
-### Step 1: 編譯 whisper.cpp CLI
+### Step 1: 編譯 metr-diarize Swift CLI
+
+```bash
+# Makefile target: swift
+cd tools/metr-diarize
+swift build -c release
+cp .build/release/metr-diarize ../../embedded/binaries/darwin-arm64/
+```
+
+### Step 2: 編譯 whisper.cpp CLI
 
 ```bash
 # scripts/build-whisper.sh
@@ -1114,16 +1081,9 @@ Step 3: 編譯 Go Binary（go:embed 自動嵌入）
 set -e
 
 WHISPER_VERSION="v1.7.3"  # 鎖定版本
-PLATFORM="$(uname -s)-$(uname -m)"  # Darwin-arm64
-
-WORKDIR="$(mktemp -d)"
 OUTDIR="embedded/binaries/darwin-arm64"
 
-git clone --depth 1 --branch "$WHISPER_VERSION" \
-  https://github.com/ggml-org/whisper.cpp.git "$WORKDIR"
-
-cd "$WORKDIR"
-
+# clone + cmake build（Metal GPU 加速）
 cmake -B build \
   -DCMAKE_BUILD_TYPE=Release \
   -DGGML_METAL=1 \
@@ -1131,31 +1091,11 @@ cmake -B build \
   -DBUILD_SHARED_LIBS=0
 
 cmake --build build -j --config Release --target whisper-cli
-
-# 複製到 embedded 目錄
 mkdir -p "$OUTDIR"
 cp build/bin/whisper-cli "$OUTDIR/"
-
-# 清理
-rm -rf "$WORKDIR"
-
-echo "✓ whisper-cli built at $OUTDIR/whisper-cli"
 ```
 
-### Step 2: 下載 ONNX Runtime dylib
-
-```bash
-# Makefile target
-ONNX_VERSION=1.19.0
-ONNX_URL=https://github.com/microsoft/onnxruntime/releases/download/v$(ONNX_VERSION)/onnxruntime-osx-arm64-$(ONNX_VERSION).tgz
-
-download-onnxruntime:
-	curl -L $(ONNX_URL) | tar xz -C /tmp
-	cp /tmp/onnxruntime-osx-arm64-$(ONNX_VERSION)/lib/libonnxruntime.dylib \
-	   embedded/binaries/darwin-arm64/
-```
-
-### Step 3: 編譯 Go Binary
+### Step 3 & 4: Go Binary 編譯
 
 ```go
 // embedded/embedded.go
@@ -1164,76 +1104,84 @@ package embedded
 import "embed"
 
 //go:embed binaries/darwin-arm64/whisper-cli
-var whisperCLI []byte
+//go:embed binaries/darwin-arm64/ffmpeg
+//go:embed binaries/darwin-arm64/metr-diarize
+var Binaries embed.FS
 
-//go:embed binaries/darwin-arm64/libonnxruntime.dylib
-var onnxruntimeDylib []byte
+const CacheDir = ".metr"
 
-const CacheDir = ".meeting-emo-transcriber"
-
-// ExtractAll 首次執行時解壓到 ~/.meeting-emo-transcriber/bin/
+// ExtractAll 首次執行時解壓到 ~/.metr/bin/
 // 比對嵌入的 hash，若快取已存在且一致則跳過
 func ExtractAll() (binDir string, err error) {
     // 1. 建立 ~/CacheDir/bin/
     // 2. 寫入 whisper-cli（設定 0755 權限）
-    // 3. 寫入 libonnxruntime.dylib
-    // 4. 回傳 binDir 路徑
+    // 3. 寫入 ffmpeg（設定 0755 權限）
+    // 4. 寫入 metr-diarize（設定 0755 權限）
+    // 5. 回傳 binDir 路徑
 }
 ```
 
 ```bash
 # 最終編譯
 CGO_ENABLED=1 GOOS=darwin GOARCH=arm64 \
-  go build -o meeting-emo-transcriber ./cmd/main.go
-
-# 驗證 — 不應看到 libonnxruntime.dylib（已嵌入）
-otool -L meeting-emo-transcriber
-# 預期只有：
-#   /usr/lib/libSystem.B.dylib
-#   /usr/lib/libresolv.9.dylib
+  go build -o metr ./cmd/main.go
 ```
 
 ### Makefile 整合
 
 ```makefile
-.PHONY: all build clean
+.PHONY: all build swift whisper ffmpeg clean clean-all info
 
-all: build
+# 完整建置：Swift CLI + whisper-cli + ffmpeg + Go binary
+all: swift whisper ffmpeg build
 
-# 編譯 whisper.cpp CLI
+# 編譯 metr-diarize Swift CLI（FluidAudio CoreML/ANE）
+swift:
+	cd tools/metr-diarize && swift build -c release
+	cp tools/metr-diarize/.build/release/metr-diarize embedded/binaries/darwin-arm64/
+
+# 編譯 whisper.cpp CLI（Metal GPU）
 whisper:
 	bash scripts/build-whisper.sh
 
-# 下載 ONNX Runtime
-onnxruntime:
-	# ... (如上)
+# 取得 ffmpeg
+ffmpeg:
+	bash scripts/build-ffmpeg.sh
 
-# 編譯 Go Binary（需先完成 whisper + onnxruntime）
-build: whisper onnxruntime
+# 編譯 Go Binary（embed.FS 自動嵌入 3 個 Binary，無 build tag）
+build:
 	CGO_ENABLED=1 GOOS=darwin GOARCH=arm64 \
-	  go build -o meeting-emo-transcriber ./cmd/main.go
+	  go build -o metr ./cmd/main.go
 
 clean:
+	rm -f metr
+
+clean-all:
+	rm -f metr
 	rm -rf embedded/binaries/
-	rm -f meeting-emo-transcriber
+	go clean -cache
+
+info:
+	@echo "Platform: $(shell uname -s)-$(shell uname -m)"
+	@ls embedded/binaries/darwin-arm64/ 2>/dev/null || echo "No binaries built yet"
 ```
 
 ### 交付物
 
 ```
-meeting-emo-transcriber-v0.1.0-darwin-arm64/
-├── meeting-emo-transcriber          # Go Binary（內含 whisper-cli + libonnxruntime.dylib）
+metr-v0.1.0-darwin-arm64/
+├── metr          # Go Binary（內含 whisper-cli + ffmpeg + metr-diarize）
 └── README.md
-# Binary 本體 ~80MB（含嵌入的 whisper-cli + dylib）
-# 模型不隨 Binary 分發，首次執行時自動下載（~3.1GB）
+# Binary 本體 ~80MB（含嵌入的 3 個 Binary）
+# 模型不隨 Binary 分發，首次執行時自動下載（~3+GB）
 ```
 
 ### 安裝流程
 
 ```
 1. 下載 Binary → 放入 PATH（或任意位置）
-2. 執行 `meeting-emo-transcriber init` → 建立 speakers/ + output/
-3. 首次 transcribe 時自動下載模型到 ~/.meeting-emo-transcriber/models/
+2. 執行 `metr init` → 建立 speakers/ + output/
+3. 首次 transcribe 時自動下載模型到 ~/.metr/models/
 ```
 
 > **設計原則**：使用者拿到的只有一個執行檔。模型自動下載、依賴自動解壓，零手動設定。
@@ -1262,12 +1210,12 @@ meeting-emo-transcriber-v0.1.0-darwin-arm64/
 2. **Verify E2E**：`speakers verify --name TestUser --audio test.wav` → 確認回傳 similarity 分數
 3. **Transcribe E2E**：提供多講者測試音檔 → transcribe → 驗證輸出包含正確的 speaker / emotion / text
 4. **Auto-Enroll E2E**：刪除 `.profile.json` → 直接執行 `transcribe` → 確認自動重建快取
-5. **Unknown Speaker 自動發現 E2E**：
-   - 使用包含未註冊講者的測試音檔 → transcribe → 確認自動建立 `speaker_N/` 資料夾
-   - 確認資料夾內有自動儲存的音訊樣本和 `.profile.json`
-   - 重新命名 `speaker_1/` → `TestUser/` → 再次 transcribe → 確認使用新名稱
-   - 使用 `--no-discover` → transcribe → 確認不建立新資料夾
-6. **Binary 測試**：編譯後 `otool -L` 確認無意外依賴
+5. **Diarization + Speaker Resolve E2E**：
+   - 使用包含多位講者的測試音檔 → transcribe → 確認 metr-diarize 子程序正常執行
+   - 確認 ASRResult 與 DiarSegment 正確依時間重疊合併
+   - 已註冊講者的片段確認標註正確姓名
+   - 未註冊講者的片段確認以 `speaker_N` 標註
+6. **Binary 測試**：`make all` 後確認 `embedded/binaries/darwin-arm64/` 含 3 個 Binary；`otool -L metr` 確認無意外系統動態庫依賴
 
 ### 測試音檔
 
