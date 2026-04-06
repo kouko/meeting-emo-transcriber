@@ -32,6 +32,7 @@ func newTranscribeCmd() *cobra.Command {
 		numSpeakers    int
 		learn          bool
 		enhance        bool
+		prompt         string
 	)
 	cmd := &cobra.Command{
 		Use:   "transcribe",
@@ -98,12 +99,19 @@ func newTranscribeCmd() *cobra.Command {
 
 			// 7. Run ASR
 			fmt.Fprintf(os.Stderr, "[5/9] Running speech recognition...\n")
+			// Merge --prompt + config vocabulary
+			allPrompt := mergePrompts(prompt, cfg.Vocabulary)
+			if allPrompt != "" {
+				fmt.Fprintf(os.Stderr, "  --prompt=%q\n", allPrompt)
+			}
+
 			whisperCfg := asr.WhisperConfig{
 				BinPath:      bins.WhisperCLI,
 				ModelPath:    asrModelPath,
 				VADModelPath: vadModelPath,
 				Language:     language,
 				Threads:      cfg.Threads,
+				Prompt:       allPrompt,
 			}
 			results, err := asr.TranscribeWithCache(whisperCfg, tempWavPath, inputPath)
 			if err != nil {
@@ -273,11 +281,24 @@ func newTranscribeCmd() *cobra.Command {
 	cmd.Flags().IntVar(&numSpeakers, "num-speakers", 0, "expected number of speakers (0 = auto-detect)")
 	cmd.Flags().BoolVarP(&learn, "learning-mode", "l", false, "create folders for all clusters (including matched) for manual review")
 	cmd.Flags().BoolVar(&enhance, "enhance", false, "enhance audio with DeepFilterNet3 noise reduction before processing")
+	cmd.Flags().StringVar(&prompt, "prompt", "", "custom vocabulary/context hints for ASR (comma-separated)")
 	cmd.MarkFlagRequired("input")
 	return cmd
 }
 
 // resolveOutputPath determines the output file path for a given format.
+// mergePrompts combines CLI --prompt and config.yaml vocabulary into one string.
+func mergePrompts(cliPrompt string, configVocab []string) string {
+	var parts []string
+	if len(configVocab) > 0 {
+		parts = append(parts, strings.Join(configVocab, ", "))
+	}
+	if cliPrompt != "" {
+		parts = append(parts, cliPrompt)
+	}
+	return strings.Join(parts, ", ")
+}
+
 func resolveOutputPath(inputPath, outputPath, format string) string {
 	ext := "." + format
 	if outputPath != "" {

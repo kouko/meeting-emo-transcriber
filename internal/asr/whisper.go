@@ -19,6 +19,7 @@ type WhisperConfig struct {
 	VADModelPath string
 	Language     string // "auto" | "zh-TW" | "zh" | "en" | "ja"
 	Threads      int
+	Prompt       string // initial prompt for vocabulary/context hints
 }
 
 // whisperLang converts our language codes to whisper-cli compatible codes.
@@ -43,6 +44,9 @@ func buildWhisperArgs(cfg WhisperConfig, wavPath, outputBase string) []string {
 		"-t", strconv.Itoa(cfg.Threads),
 		"-osrt",
 		"-of", outputBase,
+	}
+	if cfg.Prompt != "" {
+		args = append(args, "--prompt", cfg.Prompt)
 	}
 	return args
 }

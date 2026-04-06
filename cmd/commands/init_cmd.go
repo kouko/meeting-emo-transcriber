@@ -21,7 +21,7 @@ func newInitCmd() *cobra.Command {
 			}
 			configPath := filepath.Join("speakers", "config.yaml")
 			if _, err := os.Stat(configPath); os.IsNotExist(err) {
-				template := "# speakers/config.yaml\n# Uncomment and modify values as needed.\n\n# language: \"auto\"        # auto | zh-TW | zh | en | ja\n# threshold: 0.6          # Speaker similarity threshold\n# format: txt             # txt | json | srt | all\n# discover: true          # Auto-discover unknown speakers\n"
+				template := "# speakers/config.yaml\n# Uncomment and modify values as needed.\n\n# language: \"auto\"        # auto | zh-TW | zh | en | ja\n# threshold: 0.8          # Diarization clustering threshold (higher = more speakers)\n# format: txt             # txt | json | srt | all\n\n# Custom vocabulary for better ASR accuracy (names, terms, jargon)\n# vocabulary:\n#   - \"kouko\"\n#   - \"YanJen\"\n#   - \"Claude\"\n#   - \"Kubernetes\"\n"
 				if err := os.WriteFile(configPath, []byte(template), 0644); err != nil {
 					return fmt.Errorf("writing config template: %w", err)
 				}

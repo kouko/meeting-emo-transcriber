@@ -18,14 +18,15 @@ type Models struct {
 
 // Config holds all application configuration.
 type Config struct {
-	Language  string
-	Threshold float64
-	Format    string
-	Strategy  string
-	Discover  bool
-	LogLevel  string
-	Threads   int
-	Models    Models
+	Language   string
+	Threshold  float64
+	Format     string
+	Strategy   string
+	Discover   bool
+	LogLevel   string
+	Threads    int
+	Models     Models
+	Vocabulary []string // custom vocabulary for whisper prompt
 }
 
 // defaultModelsDir returns ~/.metr/models/
@@ -94,13 +95,14 @@ func Load(configPath, speakersDir string) (Config, error) {
 	}
 
 	cfg := Config{
-		Language:  v.GetString("language"),
-		Threshold: v.GetFloat64("threshold"),
-		Format:    v.GetString("format"),
-		Strategy:  v.GetString("strategy"),
-		Discover:  v.GetBool("discover"),
-		LogLevel:  v.GetString("loglevel"),
-		Threads:   v.GetInt("threads"),
+		Language:   v.GetString("language"),
+		Threshold:  v.GetFloat64("threshold"),
+		Format:     v.GetString("format"),
+		Strategy:   v.GetString("strategy"),
+		Discover:   v.GetBool("discover"),
+		LogLevel:   v.GetString("loglevel"),
+		Threads:    v.GetInt("threads"),
+		Vocabulary: v.GetStringSlice("vocabulary"),
 		Models: Models{
 			Whisper: v.GetString("models.whisper"),
 			Speaker: v.GetString("models.speaker"),
