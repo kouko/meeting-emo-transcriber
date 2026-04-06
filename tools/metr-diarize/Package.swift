@@ -12,6 +12,9 @@ let package = Package(
             name: "metr-diarize",
             dependencies: [
                 .product(name: "FluidAudio", package: "FluidAudio"),
+            ],
+            swiftSettings: [
+                .swiftLanguageMode(.v5),
             ]
         ),
     ]
