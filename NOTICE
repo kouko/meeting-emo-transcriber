@@ -1,0 +1,71 @@
+metr — Meeting Emotion Transcriber
+Copyright (c) 2026 kouko
+
+This product includes software developed by third parties.
+
+## Embedded Binaries
+
+whisper-cli (whisper.cpp)
+  Copyright (c) 2023-2024 The ggml authors
+  License: MIT
+  https://github.com/ggml-org/whisper.cpp
+
+ffmpeg (built from source, LGPL)
+  Copyright (c) 2000-2024 FFmpeg developers
+  License: LGPL-2.1-or-later
+  https://ffmpeg.org/
+
+metr-diarize (FluidAudio)
+  Copyright (c) 2025 Ivan Digital / FluidInference
+  License: Apache-2.0
+  https://github.com/FluidInference/FluidAudio
+
+metr-denoise (speech-swift / Soniqo)
+  License: Apache-2.0
+  https://github.com/soniqo/speech-swift
+
+## Go Dependencies
+
+sherpa-onnx (k2-fsa)
+  License: Apache-2.0
+  https://github.com/k2-fsa/sherpa-onnx
+
+ONNX Runtime (Microsoft)
+  Copyright (c) Microsoft Corporation
+  License: MIT
+  https://github.com/microsoft/onnxruntime
+
+cobra (spf13)
+  License: Apache-2.0
+
+viper (spf13)
+  License: MIT
+
+go-audio/wav, go-audio/audio
+  License: Apache-2.0
+
+## Runtime Models (downloaded on first use, not embedded)
+
+Whisper Large-v3 (OpenAI)
+  License: MIT
+  https://huggingface.co/openai/whisper-large-v3
+
+Breeze ASR 25 (MediaTek Research)
+  License: Apache-2.0
+  https://huggingface.co/alan314159/Breeze-ASR-25-whispercpp
+
+SenseVoice-Small (FunAudioLLM / Alibaba)
+  License: FunASR Model License v1.1 (non-OSI, custom terms)
+  https://github.com/modelscope/FunASR/blob/main/MODEL_LICENSE
+
+CT-Transformer Punctuation (FunASR / Alibaba)
+  License: FunASR Model License v1.1 (non-OSI, custom terms)
+  https://github.com/modelscope/FunASR/blob/main/MODEL_LICENSE
+
+FluidAudio CoreML Diarization Models (pyannote)
+  License: MIT
+  https://huggingface.co/pyannote/speaker-diarization-3.1
+
+WeSpeaker Embeddings
+  License: CC-BY-4.0
+  https://github.com/wenet-e2e/wespeaker

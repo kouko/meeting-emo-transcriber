@@ -263,4 +263,4 @@ docs/                  SPEC + design docs + implementation plans
 
 ## License
 
-TBD
+[MIT](LICENSE)

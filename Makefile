@@ -21,8 +21,8 @@ build-deps:
 	@bash scripts/build-denoise.sh
 
 download-deps:
-	@echo "==> Downloading ffmpeg..."
-	@bash scripts/download-ffmpeg.sh
+	@echo "==> Building ffmpeg (LGPL, from source)..."
+	@bash scripts/build-ffmpeg.sh
 
 # Build the Go binary
 build:
