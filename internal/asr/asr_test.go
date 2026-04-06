@@ -174,11 +174,10 @@ func TestParseSRTWhitespace(t *testing.T) {
 
 func TestBuildWhisperArgs(t *testing.T) {
 	cfg := WhisperConfig{
-		BinPath:      "/path/to/whisper-cli",
-		ModelPath:    "/path/to/model.bin",
-		VADModelPath: "/path/to/vad.bin",
-		Language:     "auto",
-		Threads:      4,
+		BinPath:   "/path/to/whisper-cli",
+		ModelPath: "/path/to/model.bin",
+		Language:  "auto",
+		Threads:   4,
 	}
 
 	args := buildWhisperArgs(cfg, "/tmp/input.wav", "/tmp/output")
@@ -199,16 +198,20 @@ func TestBuildWhisperArgs(t *testing.T) {
 	}
 }
 
-func TestBuildWhisperArgsNoVAD(t *testing.T) {
+func TestBuildWhisperArgsWithPrompt(t *testing.T) {
 	cfg := WhisperConfig{
 		BinPath:   "/path/to/whisper-cli",
 		ModelPath: "/path/to/model.bin",
 		Language:  "ja",
 		Threads:   8,
+		Prompt:    "kouko, YanJen",
 	}
 	args := buildWhisperArgs(cfg, "/tmp/input.wav", "/tmp/output")
 	joined := strings.Join(args, " ")
-	if strings.Contains(joined, "--vad") {
-		t.Error("should not contain --vad when VADModelPath is empty")
+	if !strings.Contains(joined, "--prompt") {
+		t.Error("should contain --prompt when Prompt is set")
+	}
+	if !strings.Contains(joined, "kouko, YanJen") {
+		t.Error("should contain prompt text")
 	}
 }

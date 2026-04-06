@@ -50,35 +50,28 @@ func newTranscribeCmd() *cobra.Command {
 			}
 
 			// 3. Extract embedded binaries
-			fmt.Fprintf(os.Stderr, "[1/9] Extracting embedded binaries...\n")
+			fmt.Fprintf(os.Stderr, "[1/8] Extracting embedded binaries...\n")
 			bins, err := embedded.ExtractAll()
 			if err != nil {
 				return fmt.Errorf("extract binaries: %w", err)
 			}
 
 			// 4. Ensure ASR model
-			fmt.Fprintf(os.Stderr, "[2/9] Ensuring ASR model...\n")
+			fmt.Fprintf(os.Stderr, "[2/8] Ensuring ASR model...\n")
 			asrModelName := models.ResolveASRModel(language)
 			asrModelPath, err := models.EnsureModel(asrModelName)
 			if err != nil {
 				return fmt.Errorf("ensure ASR model: %w", err)
 			}
 
-			// 5. Ensure VAD model
-			fmt.Fprintf(os.Stderr, "[3/9] Ensuring VAD model...\n")
-			vadModelPath, err := models.EnsureModel("silero-vad-v6.2.0")
-			if err != nil {
-				return fmt.Errorf("ensure VAD model: %w", err)
-			}
-
-			// 6. Create temp dir and convert to WAV
+			// 5. Create temp dir and convert to WAV
 			tmpDir, err := os.MkdirTemp("", "met-transcribe-*")
 			if err != nil {
 				return fmt.Errorf("create temp dir: %w", err)
 			}
 			defer os.RemoveAll(tmpDir)
 
-			fmt.Fprintf(os.Stderr, "[4/9] Converting audio to WAV...\n")
+			fmt.Fprintf(os.Stderr, "[3/8] Converting audio to WAV...\n")
 			tempWavPath := filepath.Join(tmpDir, "audio.wav")
 			if err := audio.ConvertToWAV(bins.FFmpeg, inputPath, tempWavPath); err != nil {
 				return fmt.Errorf("convert to WAV: %w", err)
@@ -98,7 +91,7 @@ func newTranscribeCmd() *cobra.Command {
 			}
 
 			// 7. Run ASR
-			fmt.Fprintf(os.Stderr, "[5/9] Running speech recognition...\n")
+			fmt.Fprintf(os.Stderr, "[4/8] Running speech recognition...\n")
 			// Merge --prompt + config vocabulary
 			allPrompt := mergePrompts(prompt, cfg.Vocabulary)
 			if allPrompt != "" {
@@ -108,7 +101,6 @@ func newTranscribeCmd() *cobra.Command {
 			whisperCfg := asr.WhisperConfig{
 				BinPath:      bins.WhisperCLI,
 				ModelPath:    asrModelPath,
-				VADModelPath: vadModelPath,
 				Language:     language,
 				Threads:      cfg.Threads,
 				Prompt:       allPrompt,
@@ -123,7 +115,7 @@ func newTranscribeCmd() *cobra.Command {
 			if numSpeakers > 0 {
 				speakersDesc = fmt.Sprintf("%d", numSpeakers)
 			}
-			fmt.Fprintf(os.Stderr, "[6/9] Running speaker diarization...\n")
+			fmt.Fprintf(os.Stderr, "[5/8] Running speaker diarization...\n")
 			fmt.Fprintf(os.Stderr, "  --threshold=%.2f (higher=more speakers, lower=fewer speakers)\n", threshold)
 			fmt.Fprintf(os.Stderr, "  --num-speakers=%s\n", speakersDesc)
 			diarResult, err := diarize.Process(bins.Diarize, tempWavPath, threshold, numSpeakers)
@@ -141,7 +133,7 @@ func newTranscribeCmd() *cobra.Command {
 			speakerIDs := diarize.AssignSpeakers(results, diarResult.Segments)
 
 			// 11. Resolve speaker names (WeSpeaker 256-dim centroid embeddings)
-			fmt.Fprintf(os.Stderr, "[7/9] Resolving speaker identities...\n")
+			fmt.Fprintf(os.Stderr, "[6/8] Resolving speaker identities...\n")
 			fmt.Fprintf(os.Stderr, "  --match-threshold=%.2f (higher=stricter matching, lower=more lenient)\n", matchThreshold)
 			store := speaker.NewStore(speakersDir, config.SupportedAudioExtensions())
 
@@ -177,7 +169,7 @@ func newTranscribeCmd() *cobra.Command {
 			}
 
 			// 13. Emotion classification + build segments
-			fmt.Fprintf(os.Stderr, "[8/9] Running emotion classification...\n")
+			fmt.Fprintf(os.Stderr, "[7/8] Running emotion classification...\n")
 			emotionModelDir, err := models.EnsureModel("sensevoice-small-int8")
 			if err != nil {
 				return fmt.Errorf("ensure emotion model: %w", err)
@@ -248,7 +240,7 @@ func newTranscribeCmd() *cobra.Command {
 			}
 
 			// 15. Format and write output files
-			fmt.Fprintf(os.Stderr, "[9/9] Writing output files...\n")
+			fmt.Fprintf(os.Stderr, "[8/8] Writing output files...\n")
 			formats := config.ParseFormats(format)
 			for _, fmt_ := range formats {
 				outPath := resolveOutputPath(inputPath, outputPath, fmt_)

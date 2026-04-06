@@ -27,7 +27,7 @@ func TestResolveASRModel(t *testing.T) {
 }
 
 func TestRegistryContainsRequiredModels(t *testing.T) {
-	required := []string{"ggml-large-v3", "silero-vad-v6.2.0"}
+	required := []string{"ggml-large-v3", "sensevoice-small-int8"}
 	for _, name := range required {
 		t.Run(name, func(t *testing.T) {
 			if _, ok := Registry[name]; !ok {
@@ -60,19 +60,6 @@ func TestModelsDir(t *testing.T) {
 	}
 }
 
-func TestRegistryContainsSpeakerModel(t *testing.T) {
-	info, ok := Registry["campplus-sv-zh-cn"]
-	if !ok {
-		t.Fatal("Registry missing campplus-sv-zh-cn")
-	}
-	if info.Category != "speaker" {
-		t.Errorf("Category = %q, want \"speaker\"", info.Category)
-	}
-	if info.URL == "" {
-		t.Error("URL is empty")
-	}
-}
-
 func TestRegistryContainsEmotionModel(t *testing.T) {
 	info, ok := Registry["sensevoice-small-int8"]
 	if !ok {
@@ -86,29 +73,11 @@ func TestRegistryContainsEmotionModel(t *testing.T) {
 	}
 }
 
-func TestRegistryContainsDiarizeModels(t *testing.T) {
-	for _, name := range []string{"pyannote-segmentation-3-0", "eres2net-embedding"} {
-		t.Run(name, func(t *testing.T) {
-			info, ok := Registry[name]
-			if !ok {
-				t.Fatalf("Registry missing %q", name)
-			}
-			if info.Category != "diarize" {
-				t.Errorf("Category = %q, want \"diarize\"", info.Category)
-			}
-			if info.URL == "" {
-				t.Error("URL is empty")
-			}
-		})
-	}
-}
-
 func TestModelFilename(t *testing.T) {
 	tests := []struct {
 		name, url, expected string
 	}{
 		{"ggml-large-v3", "https://example.com/model.bin", "ggml-large-v3.bin"},
-		{"campplus-sv-zh-cn", "https://example.com/model.onnx", "campplus-sv-zh-cn.onnx"},
 		{"sensevoice-small-int8", "https://example.com/archive.tar.bz2", "sensevoice-small-int8"},
 	}
 	for _, tt := range tests {

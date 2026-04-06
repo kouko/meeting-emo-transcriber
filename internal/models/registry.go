@@ -8,7 +8,7 @@ type ModelInfo struct {
 	URL       string
 	SHA256    string
 	Size      int64  // bytes, for progress display
-	Category  string // "asr" | "vad" | "speaker" | "emotion"
+	Category  string // "asr" | "emotion"
 	IsArchive bool   // true if the download is a compressed archive (e.g. .tar.bz2)
 }
 
@@ -17,16 +17,9 @@ var Registry = map[string]ModelInfo{
 	"ggml-large-v3": {
 		Name:     "ggml-large-v3",
 		URL:      "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3.bin",
-		SHA256:   "", // Populated after first download
+		SHA256:   "",
 		Size:     3100000000,
 		Category: "asr",
-	},
-	"silero-vad-v6.2.0": {
-		Name:     "silero-vad-v6.2.0",
-		URL:      "https://huggingface.co/ggml-org/whisper-vad/resolve/main/ggml-silero-v6.2.0.bin",
-		SHA256:   "",
-		Size:     900000,
-		Category: "vad",
 	},
 	"ggml-breeze-asr-25-q5k": {
 		Name:     "ggml-breeze-asr-25-q5k",
@@ -49,13 +42,6 @@ var Registry = map[string]ModelInfo{
 		Size:     1520000000,
 		Category: "asr",
 	},
-	"campplus-sv-zh-cn": {
-		Name:     "campplus-sv-zh-cn",
-		URL:      "https://github.com/k2-fsa/sherpa-onnx/releases/download/speaker-recongition-models/3dspeaker_speech_campplus_sv_zh-cn_16k-common.onnx",
-		SHA256:   "",
-		Size:     30000000,
-		Category: "speaker",
-	},
 	"sensevoice-small-int8": {
 		Name:      "sensevoice-small-int8",
 		URL:       "https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17.tar.bz2",
@@ -63,21 +49,6 @@ var Registry = map[string]ModelInfo{
 		Size:      228000000,
 		Category:  "emotion",
 		IsArchive: true,
-	},
-	"pyannote-segmentation-3-0": {
-		Name:      "pyannote-segmentation-3-0",
-		URL:       "https://github.com/k2-fsa/sherpa-onnx/releases/download/speaker-segmentation-models/sherpa-onnx-pyannote-segmentation-3-0.tar.bz2",
-		SHA256:    "",
-		Size:      5000000,
-		Category:  "diarize",
-		IsArchive: true,
-	},
-	"eres2net-embedding": {
-		Name:     "eres2net-embedding",
-		URL:      "https://github.com/k2-fsa/sherpa-onnx/releases/download/speaker-recongition-models/3dspeaker_speech_eres2net_base_sv_zh-cn_3dspeaker_16k.onnx",
-		SHA256:   "",
-		Size:     50000000,
-		Category: "diarize",
 	},
 }
 

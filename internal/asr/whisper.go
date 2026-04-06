@@ -14,12 +14,11 @@ import (
 )
 
 type WhisperConfig struct {
-	BinPath      string
-	ModelPath    string
-	VADModelPath string
-	Language     string // "auto" | "zh-TW" | "zh" | "en" | "ja"
-	Threads      int
-	Prompt       string // initial prompt for vocabulary/context hints
+	BinPath  string
+	ModelPath string
+	Language  string // "auto" | "zh-TW" | "zh" | "en" | "ja"
+	Threads   int
+	Prompt    string // initial prompt for vocabulary/context hints
 }
 
 // whisperLang converts our language codes to whisper-cli compatible codes.
