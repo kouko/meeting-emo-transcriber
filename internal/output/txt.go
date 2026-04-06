@@ -7,47 +7,91 @@ import (
 	"github.com/kouko/meeting-emo-transcriber/internal/types"
 )
 
-type TXTFormatter struct{}
+// TXTFormatter formats transcript as readable text, merging consecutive segments
+// from the same speaker with the same emotion into paragraphs.
+// If PunctFunc is set, punctuation is applied to each merged paragraph.
+type TXTFormatter struct {
+	PunctFunc func(string) string
+}
+
+// paragraph holds accumulated text lines for a speaker+emotion group.
+type paragraph struct {
+	Speaker  string
+	Emotion  string
+	Lines    []string
+	Events   []string // audio event displays interspersed
+}
 
 func (f *TXTFormatter) Format(result types.TranscriptResult) (string, error) {
-	var b strings.Builder
-	var currentSpeaker string
-	var currentEmotion string
+	// First pass: group segments into paragraphs by speaker+emotion
+	var paragraphs []paragraph
+	var current *paragraph
 
 	for _, seg := range result.Segments {
 		eventDisplay := types.AudioEventDisplayMap[seg.AudioEvent]
 		if eventDisplay != "" && seg.Text == "" {
-			if currentSpeaker != "" {
-				fmt.Fprintf(&b, "%s\n", eventDisplay)
+			if current != nil {
+				current.Events = append(current.Events, eventDisplay)
 			} else {
-				fmt.Fprintf(&b, "%s\n", eventDisplay)
+				// Standalone event before any speaker
+				paragraphs = append(paragraphs, paragraph{
+					Speaker: seg.Speaker,
+					Events:  []string{eventDisplay},
+				})
 			}
 			continue
 		}
 
-		speakerChanged := seg.Speaker != currentSpeaker
-		if speakerChanged {
-			if currentSpeaker != "" {
-				b.WriteString("\n")
+		speakerChanged := current == nil || seg.Speaker != current.Speaker
+		emotionChanged := current != nil && seg.Emotion.Display != current.Emotion && seg.Emotion.Display != ""
+		if speakerChanged || emotionChanged {
+			if current != nil {
+				paragraphs = append(paragraphs, *current)
 			}
-			currentSpeaker = seg.Speaker
-			currentEmotion = ""
-			if seg.Emotion.Display != "" {
-				fmt.Fprintf(&b, "%s [%s]\n", seg.Speaker, seg.Emotion.Display)
-				currentEmotion = seg.Emotion.Display
-			} else {
-				fmt.Fprintf(&b, "%s\n", seg.Speaker)
+			current = &paragraph{
+				Speaker: seg.Speaker,
+				Emotion: seg.Emotion.Display,
 			}
-		} else if seg.Emotion.Display != currentEmotion && seg.Emotion.Display != "" {
-			fmt.Fprintf(&b, "[%s] ", seg.Emotion.Display)
-			currentEmotion = seg.Emotion.Display
 		}
 
+		line := ""
 		if eventDisplay != "" {
-			fmt.Fprintf(&b, "%s ", eventDisplay)
+			line += eventDisplay + " "
 		}
 		if seg.Text != "" {
-			fmt.Fprintf(&b, "%s\n", seg.Text)
+			line += seg.Text
+		}
+		if line != "" {
+			current.Lines = append(current.Lines, line)
+		}
+	}
+	if current != nil {
+		paragraphs = append(paragraphs, *current)
+	}
+
+	// Second pass: render paragraphs, applying punctuation to merged text
+	var b strings.Builder
+	for i, p := range paragraphs {
+		if i > 0 {
+			b.WriteString("\n")
+		}
+		if p.Emotion != "" {
+			fmt.Fprintf(&b, "%s [%s]\n", p.Speaker, p.Emotion)
+		} else {
+			fmt.Fprintf(&b, "%s\n", p.Speaker)
+		}
+
+		// Merge all lines into one text block for punctuation
+		merged := strings.Join(p.Lines, " ")
+		if f.PunctFunc != nil && merged != "" {
+			merged = f.PunctFunc(merged)
+		}
+		if merged != "" {
+			fmt.Fprintf(&b, "%s\n", merged)
+		}
+
+		for _, ev := range p.Events {
+			fmt.Fprintf(&b, "%s\n", ev)
 		}
 	}
 	return b.String(), nil

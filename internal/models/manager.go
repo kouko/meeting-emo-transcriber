@@ -207,8 +207,11 @@ func ensureArchiveModel(name string, info ModelInfo, modelsDir, destDir string, 
 	}
 
 	// Find the newly extracted directory and rename to destDir.
-	// Archives typically extract to a directory like "sherpa-onnx-<model-name>/".
-	// We find directories that contain the model name as a substring.
+	// Archives extract to a directory whose name may not contain the registry name.
+	// Strategy: derive expected prefix from URL filename (strip .tar.bz2).
+	archiveBaseName := filepath.Base(info.URL)
+	archiveBaseName = strings.TrimSuffix(archiveBaseName, ".tar.bz2")
+
 	entries, err := os.ReadDir(modelsDir)
 	if err != nil {
 		return "", fmt.Errorf("read models dir: %w", err)
@@ -218,9 +221,11 @@ func ensureArchiveModel(name string, info ModelInfo, modelsDir, destDir string, 
 			continue
 		}
 		extractedDir := filepath.Join(modelsDir, entry.Name())
-		// Match if the directory name contains the registry name (e.g., "pyannote-segmentation-3-0")
-		// and is not already the dest directory
-		if extractedDir != destDir && strings.Contains(entry.Name(), name) {
+		if extractedDir == destDir {
+			continue
+		}
+		// Match by registry name substring OR archive base name
+		if strings.Contains(entry.Name(), name) || entry.Name() == archiveBaseName {
 			os.RemoveAll(destDir)
 			if err := os.Rename(extractedDir, destDir); err != nil {
 				return "", fmt.Errorf("rename %s to %s: %w", extractedDir, destDir, err)

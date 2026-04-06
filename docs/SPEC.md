@@ -67,8 +67,8 @@
 │                                                                  │
 │  ┌──────────────────────────────────────────────────────┐       │
 │  │  sherpa-onnx-go-macos (cgo, in-process)               │       │
-│  │  CAM++ 192d (Speaker Embedding + Matching)             │       │
 │  │  SenseVoice-Small int8 (Emotion + Audio Event)         │       │
+│  │  CT-Transformer int8 (Punctuation ZH+EN)               │       │
 │  └──────────────────────────────────────────────────────┘       │
 └──────────────────────────────────────────────────────────────┘
 ```
@@ -76,13 +76,20 @@
 ### 快取目錄結構
 
 ```
-~/.metr/
+~/.metr/                               # 或 ~/metr-speakers/_metr/（portable 模式）
 ├── bin/
-│   ├── whisper-cli              # whisper.cpp CLI Binary
-│   ├── ffmpeg                   # 音訊格式轉換
-│   └── metr-diarize             # FluidAudio Swift CLI
-└── models/
-    └── diarization/             # FluidAudio 使用的 CoreML 模型（自動下載）
+│   ├── whisper-cli                    # whisper.cpp CLI Binary
+│   ├── ffmpeg                         # 音訊格式轉換
+│   ├── metr-diarize                   # FluidAudio Swift CLI
+│   └── metr-denoise                   # DeepFilterNet3 Swift CLI
+├── models/
+│   ├── ggml-large-v3.bin              # ASR 模型（auto/en）
+│   ├── ggml-breeze-asr-25-q5k.bin     # ASR 模型（zh-TW）
+│   ├── sensevoice-small-int8/         # 情感辨識模型
+│   ├── ct-punc-zh-en-int8/            # 標點還原模型（ZH+EN）
+│   └── diarization/                   # FluidAudio CoreML 模型
+├── cache/                             # ASR SRT 快取（content fingerprint + language）
+└── config.yaml                        # 使用者設定
 ```
 
 首次執行時解壓嵌入的 Binary 到快取目錄。後續啟動時檢查檔案 hash，若一致則直接使用快取。
@@ -91,18 +98,20 @@
 
 | 元件 | 選型 | 角色 | 整合方式 |
 |------|------|------|---------|
-| ASR（預設） | whisper.cpp CLI + Whisper Large-v3 (GGML) | 語音轉文字 + Metal GPU 加速 | `embed.FS` + `os/exec` 子程序 |
-| ASR（台灣中文推薦） | whisper.cpp CLI + Breeze ASR 25 (GGML) | 台灣口音 + 繁體直出 + 中英混合 | 同上，僅切換模型檔案 |
+| ASR（預設） | whisper.cpp v1.7.3 + Whisper Large-v3 (GGML) | 語音轉文字 + Metal GPU 加速 | `embed.FS` + `os/exec` 子程序 |
+| ASR（台灣中文） | whisper.cpp + Breeze ASR 25 (GGML) | 台灣口音 + 繁體直出 + 中英混合 | 同上，僅切換模型檔案 |
+| ASR（簡體中文） | whisper.cpp + Belle-zh (GGML) | 簡體中文 | 同上 |
+| ASR（日文） | whisper.cpp + Kotoba Whisper v2.0 (GGML) | 日文 | 同上 |
+| 標點還原 | CT-Transformer int8 (ONNX, 72MB) | 中英文標點自動添加 | `sherpa-onnx-go-macos`（cgo, in-process） |
 | 說話者分離 | FluidAudio + metr-diarize (Swift 6.0 CLI) | CoreML/ANE 加速說話者分離 | `embed.FS` + `os/exec` 子程序 |
-| Speaker Embedding | CAM++ zh-cn (ONNX, 192d) | 聲紋向量提取 + 身份比對 | `sherpa-onnx-go-macos`（cgo, in-process） |
-| SER（預設） | SenseVoice-Small (ONNX int8, 最多 7 類+unk) | 情感辨識 | `sherpa-onnx-go-macos`（cgo, in-process，~228MB tar.bz2） |
-| VAD | silero-vad v6.2.0 | 語音活動偵測 | whisper CLI 參數控制 |
-| 音訊轉換 | ffmpeg CLI | MP3/M4A/FLAC → WAV 16kHz mono | `embed.FS` + `os/exec` 子程序 |
+| Speaker Embedding | WeSpeaker 256-dim (FluidAudio) | 聲紋向量提取 + 身份比對 | metr-diarize 子程序（raw cosine similarity） |
+| SER | SenseVoice-Small (ONNX int8, 7 類+unk) | 情感辨識 + 音訊事件偵測 | `sherpa-onnx-go-macos`（cgo, in-process） |
+| 降噪 | DeepFilterNet3 via metr-denoise (Swift CLI) | 可選語音增強（MLX Metal GPU） | `embed.FS` + `os/exec` 子程序 |
+| 音訊轉換 | ffmpeg CLI | MP3/M4A/FLAC → WAV 16kHz mono + clipping 防護 | `embed.FS` + `os/exec` 子程序 |
 | 音訊 I/O | `go-audio/wav` | 讀取 WAV PCM | pure Go |
-| 向量運算 | `gonum` | Cosine similarity | pure Go |
 | Config | `spf13/viper` | YAML 設定檔 | pure Go |
 | CLI | `spf13/cobra` | 命令列介面 | pure Go |
-| 嵌入 | `embed.FS` (標準庫) | 嵌入 3 個 CLI Binary（無 build tag） | pure Go |
+| 嵌入 | `embed.FS` (標準庫) | 嵌入 4 個 CLI Binary（無 build tag） | pure Go |
 
 ---
 

@@ -27,7 +27,7 @@ func TestResolveASRModel(t *testing.T) {
 }
 
 func TestRegistryContainsRequiredModels(t *testing.T) {
-	required := []string{"ggml-large-v3", "sensevoice-small-int8"}
+	required := []string{"ggml-large-v3", "sensevoice-small-int8", "ct-punc-zh-en-int8"}
 	for _, name := range required {
 		t.Run(name, func(t *testing.T) {
 			if _, ok := Registry[name]; !ok {
@@ -70,6 +70,19 @@ func TestRegistryContainsEmotionModel(t *testing.T) {
 	}
 	if !info.IsArchive {
 		t.Error("expected IsArchive = true for sensevoice")
+	}
+}
+
+func TestRegistryContainsPunctuationModel(t *testing.T) {
+	info, ok := Registry["ct-punc-zh-en-int8"]
+	if !ok {
+		t.Fatal("Registry missing ct-punc-zh-en-int8")
+	}
+	if info.Category != "punctuation" {
+		t.Errorf("Category = %q, want \"punctuation\"", info.Category)
+	}
+	if !info.IsArchive {
+		t.Error("expected IsArchive = true for ct-punc")
 	}
 }
 

@@ -12,7 +12,7 @@ import (
 func newUnpackCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "unpack",
-		Short: "Unpack speakers/_metr/ resources to ~/.metr/ for local use",
+		Short: "Unpack <speakers-dir>/_metr/ resources to ~/.metr/ for local use",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			srcDir := filepath.Join(speakersDir, embedded.MetrDirName)
 			dstDir := embedded.DefaultCacheDir()

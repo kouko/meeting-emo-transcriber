@@ -14,7 +14,7 @@ func newEnrollCmd() *cobra.Command {
 	var force bool
 	cmd := &cobra.Command{
 		Use:   "enroll",
-		Short: "Scan speakers/ directory and compute speaker embeddings",
+		Short: "Scan speakers directory and compute speaker embeddings",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			store := speaker.NewStore(speakersDir, config.SupportedAudioExtensions())
 			names, err := store.List()

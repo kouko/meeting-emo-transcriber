@@ -49,8 +49,8 @@ func TestTXTFormatter_MergeSameSpeaker(t *testing.T) {
 	if strings.Count(out, "Alice") != 1 {
 		t.Errorf("Alice should appear once:\n%s", out)
 	}
-	if !strings.Contains(out, "First line\nSecond line") {
-		t.Errorf("lines should be merged:\n%s", out)
+	if !strings.Contains(out, "First line Second line") {
+		t.Errorf("lines should be merged into paragraph:\n%s", out)
 	}
 }
 

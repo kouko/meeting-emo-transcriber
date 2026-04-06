@@ -13,7 +13,7 @@ import (
 func newPackCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "pack",
-		Short: "Pack binary, models, and cache into speakers/_metr/ for portable use",
+		Short: "Pack binary, models, and cache into <speakers-dir>/_metr/ for portable use",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			srcDir := embedded.DefaultCacheDir()
 			dstDir := filepath.Join(speakersDir, embedded.MetrDirName)
@@ -46,7 +46,7 @@ func newPackCmd() *cobra.Command {
 
 			totalSize := dirSize(dstDir)
 			fmt.Printf("\nPacked: %s (total %s)\n", dstDir, formatSize(totalSize))
-			fmt.Println("You can now copy the speakers/ folder to another Mac.")
+			fmt.Printf("You can now copy %s/ to another Mac.\n", speakersDir)
 			return nil
 		},
 	}

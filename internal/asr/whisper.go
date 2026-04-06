@@ -88,14 +88,15 @@ func contentFingerprint(filePath string) (string, error) {
 	return hex.EncodeToString(h.Sum(nil)[:16]), nil
 }
 
-// cacheKey generates a hash from content fingerprint + all ASR-relevant parameters.
+// cacheKey generates a hash from content fingerprint + language.
+// Language determines the model (via ResolveASRModel), so it implicitly covers model changes.
+// Prompt is intentionally excluded — it's a hint that doesn't warrant re-running whisper.
 func cacheKey(wavPath string, cfg WhisperConfig) (string, error) {
 	fp, err := contentFingerprint(wavPath)
 	if err != nil {
 		return "", err
 	}
-	modelName := filepath.Base(cfg.ModelPath)
-	key := fmt.Sprintf("%s|%s|%s|%s", fp, cfg.Language, modelName, cfg.Prompt)
+	key := fmt.Sprintf("%s|%s", fp, cfg.Language)
 	h := sha256.Sum256([]byte(key))
 	return hex.EncodeToString(h[:16]), nil
 }

@@ -50,6 +50,14 @@ var Registry = map[string]ModelInfo{
 		Category:  "emotion",
 		IsArchive: true,
 	},
+	"ct-punc-zh-en-int8": {
+		Name:      "ct-punc-zh-en-int8",
+		URL:       "https://github.com/k2-fsa/sherpa-onnx/releases/download/punctuation-models/sherpa-onnx-punct-ct-transformer-zh-en-vocab272727-2024-04-12-int8.tar.bz2",
+		SHA256:    "",
+		Size:      62000000,
+		Category:  "punctuation",
+		IsArchive: true,
+	},
 }
 
 // ResolveASRModel returns the model name for a given language.

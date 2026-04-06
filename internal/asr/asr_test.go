@@ -254,7 +254,7 @@ func TestContentFingerprint(t *testing.T) {
 	}
 }
 
-func TestCacheKeyIncludesAllFactors(t *testing.T) {
+func TestCacheKeyFactors(t *testing.T) {
 	tmpDir := t.TempDir()
 	wavPath := filepath.Join(tmpDir, "test.wav")
 	os.WriteFile(wavPath, []byte("test audio data for cache key"), 0644)
@@ -280,20 +280,12 @@ func TestCacheKeyIncludesAllFactors(t *testing.T) {
 		t.Error("different language should produce different cache key")
 	}
 
-	// Different model -> different key
-	modelCfg := baseCfg
-	modelCfg.ModelPath = "/models/ggml-breeze-asr-25-q5k.bin"
-	modelKey, _ := cacheKey(wavPath, modelCfg)
-	if baseKey == modelKey {
-		t.Error("different model should produce different cache key")
-	}
-
-	// Different prompt -> different key
+	// Different prompt -> same key (prompt is intentionally excluded)
 	promptCfg := baseCfg
 	promptCfg.Prompt = "kouko, YanJen"
 	promptKey, _ := cacheKey(wavPath, promptCfg)
-	if baseKey == promptKey {
-		t.Error("different prompt should produce different cache key")
+	if baseKey != promptKey {
+		t.Error("different prompt should produce same cache key (prompt excluded)")
 	}
 
 	// Same config -> same key (deterministic)
