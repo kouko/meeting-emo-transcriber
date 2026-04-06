@@ -1,0 +1,107 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: macos-15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Setup Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Install prerequisites
+        run: brew install ffmpeg
+
+      - name: Build all dependencies
+        run: make deps
+
+      - name: Build binary
+        run: |
+          VERSION=${{ github.ref_name }}
+          if [ "$VERSION" = "" ] || [[ ! "$VERSION" =~ ^v ]]; then
+            VERSION=$(git describe --tags --always --dirty 2>/dev/null || echo "dev")
+          fi
+          go build -ldflags "-X main.version=${VERSION}" -o metr ./cmd/
+
+      - name: Run tests
+        run: go test ./...
+
+      - name: Package binary
+        run: |
+          tar czf metr-darwin-arm64.tar.gz metr
+          shasum -a 256 metr-darwin-arm64.tar.gz > checksums.txt
+          cat checksums.txt
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v6
+        with:
+          name: metr-darwin-arm64
+          path: |
+            metr-darwin-arm64.tar.gz
+            checksums.txt
+
+  release:
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download artifacts
+        uses: actions/download-artifact@v6
+        with:
+          name: metr-darwin-arm64
+          path: release
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: release/*
+          generate_release_notes: true
+
+  update-homebrew:
+    needs: release
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout source repo
+        uses: actions/checkout@v5
+
+      - name: Download release checksums
+        run: |
+          BASE_URL="https://github.com/kouko/meeting-emo-transcriber/releases/download/${{ github.ref_name }}"
+          curl -sL "${BASE_URL}/checksums.txt" -o checksums.txt
+          cat checksums.txt
+
+      - name: Checkout homebrew-tap
+        uses: actions/checkout@v5
+        with:
+          repository: kouko/homebrew-tap
+          token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          path: homebrew-tap
+
+      - name: Update formula
+        run: |
+          VERSION="${{ github.ref_name }}"
+          VERSION="${VERSION#v}"
+          bash scripts/update-formula.sh "$VERSION" checksums.txt homebrew-tap/Formula/metr.rb
+
+      - name: Commit and push
+        run: |
+          cd homebrew-tap
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add Formula/metr.rb
+          git diff --cached --quiet && echo "No changes" && exit 0
+          git commit -m "metr ${{ github.ref_name }}"
+          git push
