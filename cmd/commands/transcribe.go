@@ -269,6 +269,40 @@ func newTranscribeCmd() *cobra.Command {
 				fmt.Fprintf(os.Stderr, "Written: %s\n", outPath)
 			}
 
+			// Save current settings to config.yaml for next run
+			configSavePath := filepath.Join(speakersDir, "config.yaml")
+			// Merge prompt into vocabulary for saving
+			var vocabToSave []string
+			vocabToSave = append(vocabToSave, cfg.Vocabulary...)
+			if prompt != "" {
+				for _, p := range strings.Split(prompt, ",") {
+					p = strings.TrimSpace(p)
+					if p != "" {
+						// Avoid duplicates
+						found := false
+						for _, v := range vocabToSave {
+							if v == p {
+								found = true
+								break
+							}
+						}
+						if !found {
+							vocabToSave = append(vocabToSave, p)
+						}
+					}
+				}
+			}
+			sc := config.SaveableConfig{
+				Language:       language,
+				Threshold:      float64(threshold),
+				MatchThreshold: float64(matchThreshold),
+				Format:         format,
+				Vocabulary:     vocabToSave,
+			}
+			if err := config.Save(configSavePath, sc); err != nil {
+				fmt.Fprintf(os.Stderr, "Warning: could not save config: %v\n", err)
+			}
+
 			return nil
 		},
 	}
