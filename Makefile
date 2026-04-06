@@ -4,7 +4,7 @@ GOARCH ?= $(shell uname -m | sed 's/x86_64/amd64/' | sed 's/aarch64/arm64/')
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
 LDFLAGS := -X main.version=$(VERSION)
 
-.PHONY: all build clean deps build-deps download-deps test info clean-all
+.PHONY: all build clean deps build-deps download-deps test info clean-all package
 
 # Default: build for current platform
 all: deps build
@@ -32,6 +32,12 @@ build:
 # Run tests
 test:
 	go test ./... -v
+
+# Package binary as tarball for release
+package: build
+	@mkdir -p dist
+	tar czf dist/$(BINARY_NAME)-$(GOOS)-$(GOARCH).tar.gz $(BINARY_NAME)
+	@echo "==> Packaged: dist/$(BINARY_NAME)-$(GOOS)-$(GOARCH).tar.gz"
 
 # Clean build artifacts (keep deps)
 clean:
