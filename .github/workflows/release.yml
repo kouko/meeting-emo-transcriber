@@ -22,7 +22,7 @@ jobs:
           cache: true
 
       - name: Install prerequisites
-        run: brew install ffmpeg
+        run: brew install cmake nasm pkg-config
 
       - name: Build all dependencies
         run: make deps
