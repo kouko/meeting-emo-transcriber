@@ -1,6 +1,8 @@
 package asr
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -213,5 +215,90 @@ func TestBuildWhisperArgsWithPrompt(t *testing.T) {
 	}
 	if !strings.Contains(joined, "kouko, YanJen") {
 		t.Error("should contain prompt text")
+	}
+}
+
+func TestContentFingerprint(t *testing.T) {
+	// Create two files with identical content at different paths
+	tmpDir := t.TempDir()
+	content := []byte("hello world test audio content for fingerprint")
+
+	pathA := filepath.Join(tmpDir, "a.wav")
+	pathB := filepath.Join(tmpDir, "subdir", "b.wav")
+	os.MkdirAll(filepath.Dir(pathB), 0755)
+	os.WriteFile(pathA, content, 0644)
+	os.WriteFile(pathB, content, 0644)
+
+	fpA, err := contentFingerprint(pathA)
+	if err != nil {
+		t.Fatalf("fingerprint A: %v", err)
+	}
+	fpB, err := contentFingerprint(pathB)
+	if err != nil {
+		t.Fatalf("fingerprint B: %v", err)
+	}
+
+	if fpA != fpB {
+		t.Errorf("same content at different paths should produce same fingerprint: %q != %q", fpA, fpB)
+	}
+
+	// Different content should produce different fingerprint
+	pathC := filepath.Join(tmpDir, "c.wav")
+	os.WriteFile(pathC, []byte("different content entirely"), 0644)
+	fpC, err := contentFingerprint(pathC)
+	if err != nil {
+		t.Fatalf("fingerprint C: %v", err)
+	}
+	if fpA == fpC {
+		t.Error("different content should produce different fingerprint")
+	}
+}
+
+func TestCacheKeyIncludesAllFactors(t *testing.T) {
+	tmpDir := t.TempDir()
+	wavPath := filepath.Join(tmpDir, "test.wav")
+	os.WriteFile(wavPath, []byte("test audio data for cache key"), 0644)
+
+	baseCfg := WhisperConfig{
+		BinPath:   "/bin/whisper",
+		ModelPath: "/models/ggml-large-v3.bin",
+		Language:  "auto",
+		Threads:   4,
+		Prompt:    "",
+	}
+
+	baseKey, err := cacheKey(wavPath, baseCfg)
+	if err != nil {
+		t.Fatalf("base cache key: %v", err)
+	}
+
+	// Different language -> different key
+	langCfg := baseCfg
+	langCfg.Language = "ja"
+	langKey, _ := cacheKey(wavPath, langCfg)
+	if baseKey == langKey {
+		t.Error("different language should produce different cache key")
+	}
+
+	// Different model -> different key
+	modelCfg := baseCfg
+	modelCfg.ModelPath = "/models/ggml-breeze-asr-25-q5k.bin"
+	modelKey, _ := cacheKey(wavPath, modelCfg)
+	if baseKey == modelKey {
+		t.Error("different model should produce different cache key")
+	}
+
+	// Different prompt -> different key
+	promptCfg := baseCfg
+	promptCfg.Prompt = "kouko, YanJen"
+	promptKey, _ := cacheKey(wavPath, promptCfg)
+	if baseKey == promptKey {
+		t.Error("different prompt should produce different cache key")
+	}
+
+	// Same config -> same key (deterministic)
+	sameKey, _ := cacheKey(wavPath, baseCfg)
+	if baseKey != sameKey {
+		t.Error("same inputs should produce same cache key")
 	}
 }

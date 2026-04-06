@@ -43,11 +43,28 @@ func newTranscribeCmd() *cobra.Command {
 				return fmt.Errorf("input file not found: %w", err)
 			}
 
-			// 2. Load config
+			// 2. Load config, then overlay only explicitly-set CLI flags
 			cfg, err := config.Load(configPath, speakersDir)
 			if err != nil {
 				return fmt.Errorf("load config: %w", err)
 			}
+			if cmd.Flags().Changed("language") {
+				cfg.Language = language
+			}
+			if cmd.Flags().Changed("threshold") {
+				cfg.Threshold = float64(threshold)
+			}
+			if cmd.Flags().Changed("match-threshold") {
+				cfg.MatchThreshold = float64(matchThreshold)
+			}
+			if cmd.Flags().Changed("format") {
+				cfg.Format = format
+			}
+			// Sync back to local vars so downstream code uses merged values
+			language = cfg.Language
+			threshold = float32(cfg.Threshold)
+			matchThreshold = float32(cfg.MatchThreshold)
+			format = cfg.Format
 
 			// 3. Extract embedded binaries
 			fmt.Fprintf(os.Stderr, "[1/8] Extracting embedded binaries...\n")
@@ -105,7 +122,7 @@ func newTranscribeCmd() *cobra.Command {
 				Threads:      cfg.Threads,
 				Prompt:       allPrompt,
 			}
-			results, err := asr.TranscribeWithCache(whisperCfg, tempWavPath, inputPath)
+			results, err := asr.TranscribeWithCache(whisperCfg, tempWavPath)
 			if err != nil {
 				return fmt.Errorf("transcribe: %w", err)
 			}

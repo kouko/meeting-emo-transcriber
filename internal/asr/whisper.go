@@ -50,13 +50,52 @@ func buildWhisperArgs(cfg WhisperConfig, wavPath, outputBase string) []string {
 	return args
 }
 
-// cacheKey generates a short hash from file path + size + mtime + extra suffix.
-func cacheKey(filePath, extra string) (string, error) {
-	info, err := os.Stat(filePath)
+const fingerprintChunkSize = 64 * 1024 // 64KB
+
+// contentFingerprint generates a hash from file size + first 64KB + last 64KB.
+// This is fast (reads at most 128KB) and content-based, so the same file at
+// different paths produces the same fingerprint.
+func contentFingerprint(filePath string) (string, error) {
+	f, err := os.Open(filePath)
 	if err != nil {
 		return "", err
 	}
-	key := fmt.Sprintf("%s|%d|%d|%s", filePath, info.Size(), info.ModTime().UnixNano(), extra)
+	defer f.Close()
+
+	info, err := f.Stat()
+	if err != nil {
+		return "", err
+	}
+	size := info.Size()
+
+	h := sha256.New()
+	// Include file size
+	fmt.Fprintf(h, "%d|", size)
+
+	// Read first 64KB
+	head := make([]byte, fingerprintChunkSize)
+	n, _ := f.Read(head)
+	h.Write(head[:n])
+
+	// Read last 64KB (if file is large enough to have a distinct tail)
+	if size > int64(fingerprintChunkSize) {
+		tail := make([]byte, fingerprintChunkSize)
+		f.Seek(-int64(fingerprintChunkSize), 2)
+		n, _ = f.Read(tail)
+		h.Write(tail[:n])
+	}
+
+	return hex.EncodeToString(h.Sum(nil)[:16]), nil
+}
+
+// cacheKey generates a hash from content fingerprint + all ASR-relevant parameters.
+func cacheKey(wavPath string, cfg WhisperConfig) (string, error) {
+	fp, err := contentFingerprint(wavPath)
+	if err != nil {
+		return "", err
+	}
+	modelName := filepath.Base(cfg.ModelPath)
+	key := fmt.Sprintf("%s|%s|%s|%s", fp, cfg.Language, modelName, cfg.Prompt)
 	h := sha256.Sum256([]byte(key))
 	return hex.EncodeToString(h[:16]), nil
 }
@@ -64,12 +103,13 @@ func cacheKey(filePath, extra string) (string, error) {
 // TranscribeWithCache checks for a cached SRT result before running whisper-cli.
 // On cache hit, returns parsed results immediately (~0s instead of ~7min).
 // On cache miss, runs whisper-cli and saves the SRT to cache.
-// originalPath is used for cache key (stable path), wavPath is the actual WAV to process.
-func TranscribeWithCache(cfg WhisperConfig, wavPath, originalPath string) ([]types.ASRResult, error) {
+// The cache key is based on file content fingerprint + language + model + prompt,
+// so the same audio file at different paths will still hit cache.
+func TranscribeWithCache(cfg WhisperConfig, wavPath string) ([]types.ASRResult, error) {
 	cacheDir := filepath.Join(embedded.CacheDir(), "cache")
 	os.MkdirAll(cacheDir, 0755)
 
-	key, err := cacheKey(originalPath, cfg.Language)
+	key, err := cacheKey(wavPath, cfg)
 	if err != nil {
 		// Can't compute cache key — fall through to normal transcription
 		return Transcribe(cfg, wavPath)
