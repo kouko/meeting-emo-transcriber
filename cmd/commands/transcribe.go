@@ -466,32 +466,56 @@ func printSpeakerGuide(speakersDir string) {
 Speaker Management / 話者管理 / 講者管理
 ------------------------------------------------------------
 
-[EN] Speakers directory: %[1]s
-  Rename:  mv %[1]s/speaker_0 %[1]s/Alice
-  Merge:   mv %[1]s/speaker_1/*.wav %[1]s/Alice/
-           mv %[1]s/speaker_1/*.profile.json %[1]s/Alice/
-           rm -r %[1]s/speaker_1
-  Re-run the same audio file to apply changes.
-  Use --learning-mode (-L) to create folders for ALL
-  detected speakers (including matched ones) for review.
+[EN] Open the speakers folder in Finder: %[1]s
 
-[JA] 話者ディレクトリ: %[1]s
-  名前変更: mv %[1]s/speaker_0 %[1]s/Alice
-  統合:     mv %[1]s/speaker_1/*.wav %[1]s/Alice/
-            mv %[1]s/speaker_1/*.profile.json %[1]s/Alice/
-            rm -r %[1]s/speaker_1
-  同じ音声ファイルを再実行すると変更が反映されます。
-  --learning-mode (-L) を使うと、全検出話者の
+  Rename a speaker:
+    Right-click "speaker_0" folder > Rename > type the person's name
+    (e.g. "Alice")
+
+  Merge two speakers (same person detected as different speakers):
+    Open "speaker_1" folder, select all files inside,
+    drag & drop them into the "Alice" folder,
+    then delete the empty "speaker_1" folder.
+
+  After renaming or merging, run the same audio file again
+  to get updated results with correct speaker names.
+
+  Tip: add --learning-mode to create folders for ALL detected
+  speakers (including already matched ones) for manual review.
+
+[JA] Finder で話者フォルダを開いてください: %[1]s
+
+  話者の名前を変更する:
+    「speaker_0」フォルダを右クリック > 名前を変更 >
+    本人の名前を入力（例：「Alice」）
+
+  話者を統合する（同一人物が別々に検出された場合）:
+    「speaker_1」フォルダを開き、中のファイルを全て選択して
+    「Alice」フォルダにドラッグ＆ドロップし、
+    空になった「speaker_1」フォルダを削除してください。
+
+  名前変更や統合の後、同じ音声ファイルを再実行すると
+  正しい話者名で結果が更新されます。
+
+  ヒント: --learning-mode を付けると、全検出話者の
   フォルダが作成され、手動で確認できます。
 
-[ZH] 講者資料夾: %[1]s
-  重新命名: mv %[1]s/speaker_0 %[1]s/Alice
-  合併講者: mv %[1]s/speaker_1/*.wav %[1]s/Alice/
-            mv %[1]s/speaker_1/*.profile.json %[1]s/Alice/
-            rm -r %[1]s/speaker_1
-  重新執行同一個音檔即可套用變更。
-  使用 --learning-mode (-L) 可為所有偵測到的講者
-  （含已配對的）建立資料夾，方便手動檢視。
+[ZH] 請用 Finder 開啟講者資料夾: %[1]s
+
+  重新命名講者:
+    在「speaker_0」資料夾上按右鍵 > 重新命名 >
+    輸入本人的名字（例如「Alice」）
+
+  合併講者（同一人被辨識為不同講者時）:
+    打開「speaker_1」資料夾，全選裡面的檔案，
+    拖放到「Alice」資料夾中，
+    再刪除空的「speaker_1」資料夾。
+
+  重新命名或合併後，再次執行同一個音檔，
+  就會得到使用正確講者名稱的結果。
+
+  提示: 加上 --learning-mode 可為所有偵測到的講者
+  （含已配對的）建立資料夾，方便手動檢視與修正。
 ------------------------------------------------------------
 `, speakersDir)
 }
