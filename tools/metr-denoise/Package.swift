@@ -13,6 +13,9 @@ let package = Package(
             dependencies: [
                 .product(name: "SpeechEnhancement", package: "speech-swift"),
                 .product(name: "AudioCommon", package: "speech-swift"),
+            ],
+            swiftSettings: [
+                .swiftLanguageMode(.v5),
             ]
         ),
     ]
