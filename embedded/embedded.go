@@ -24,10 +24,37 @@ type BinPaths struct {
 	Denoise    string
 }
 
-// CacheDir returns the root cache directory for extracted binaries.
-// The MET_CACHE_DIR environment variable overrides the default
-// (~/.metr) to simplify testing.
+// MetrDirName is the resource directory name inside the speakers folder.
+const MetrDirName = "_metr"
+
+// speakersDir is set by SetSpeakersDir to enable portable mode detection.
+var speakersDir string
+
+// SetSpeakersDir sets the speakers directory for portable mode detection.
+// Must be called before CacheDir() or ExtractAll().
+func SetSpeakersDir(dir string) {
+	speakersDir = dir
+}
+
+// CacheDir returns the root cache directory.
+// Priority: MET_CACHE_DIR env > speakers/_metr/ (portable) > ~/.metr (default)
 func CacheDir() string {
+	if dir := os.Getenv("MET_CACHE_DIR"); dir != "" {
+		return dir
+	}
+	// Check for portable mode: speakers/_metr/ exists
+	if speakersDir != "" {
+		portableDir := filepath.Join(speakersDir, MetrDirName)
+		if info, err := os.Stat(portableDir); err == nil && info.IsDir() {
+			return portableDir
+		}
+	}
+	home, _ := os.UserHomeDir()
+	return filepath.Join(home, ".metr")
+}
+
+// DefaultCacheDir returns ~/.metr (ignoring portable mode). Used by pack/unpack.
+func DefaultCacheDir() string {
 	if dir := os.Getenv("MET_CACHE_DIR"); dir != "" {
 		return dir
 	}

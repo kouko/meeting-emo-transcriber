@@ -90,10 +90,11 @@ func Load(configPath, speakersDir string) (Config, error) {
 			return Config{}, err
 		}
 	} else if speakersDir != "" {
-		// Try speakers/config.yaml as optional config.
+		// Try speakers/_metr/config.yaml first, fallback to speakers/config.yaml
 		v.SetConfigName("config")
 		v.SetConfigType("yaml")
-		v.AddConfigPath(speakersDir)
+		v.AddConfigPath(filepath.Join(speakersDir, "_metr"))
+		v.AddConfigPath(speakersDir) // backward compat
 		// Ignore error when file doesn't exist.
 		_ = v.ReadInConfig()
 	}

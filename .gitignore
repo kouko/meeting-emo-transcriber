@@ -15,6 +15,7 @@ embedded/bin/
 
 # Speakers data (personal voiceprints)
 speakers/
+_metr/
 
 # Output (user working directory, not internal/output/)
 /output/

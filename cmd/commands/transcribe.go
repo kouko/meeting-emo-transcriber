@@ -270,7 +270,9 @@ func newTranscribeCmd() *cobra.Command {
 			}
 
 			// Save current settings to config.yaml for next run
-			configSavePath := filepath.Join(speakersDir, "config.yaml")
+			metrDir := filepath.Join(speakersDir, "_metr")
+			os.MkdirAll(metrDir, 0755)
+			configSavePath := filepath.Join(metrDir, "config.yaml")
 			// Merge prompt into vocabulary for saving
 			var vocabToSave []string
 			vocabToSave = append(vocabToSave, cfg.Vocabulary...)

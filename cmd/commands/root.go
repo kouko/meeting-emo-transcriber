@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/kouko/meeting-emo-transcriber/embedded"
 	"github.com/spf13/cobra"
 )
 
@@ -27,12 +28,19 @@ func NewRootCmd() *cobra.Command {
 		Short: "Meeting transcriber with speaker identification and emotion recognition",
 	}
 	root.PersistentFlags().StringVar(&speakersDir, "speakers", "./speakers", "speakers directory path")
-	root.PersistentFlags().StringVar(&configPath, "config", "", "config file path (default: <speakers-dir>/config.yaml)")
+	root.PersistentFlags().StringVar(&configPath, "config", "", "config file path (default: <speakers-dir>/_metr/config.yaml)")
+
+	// Set speakers dir for portable mode detection (before any command runs)
+	root.PersistentPreRun = func(cmd *cobra.Command, args []string) {
+		embedded.SetSpeakersDir(speakersDir)
+	}
 	root.PersistentFlags().StringVar(&logLevel, "log-level", "info", "log level: debug|info|warn|error")
 	root.AddCommand(newInitCmd())
 	root.AddCommand(newTranscribeCmd())
 	root.AddCommand(newEnrollCmd())
 	root.AddCommand(newSpeakersCmd())
+	root.AddCommand(newPackCmd())
+	root.AddCommand(newUnpackCmd())
 
 	// Rewrite args: if first arg is an audio file, prepend "transcribe --input"
 	originalArgs := os.Args[1:]
@@ -41,6 +49,7 @@ func NewRootCmd() *cobra.Command {
 		// Skip if it's a known subcommand, flag, or help
 		if first != "transcribe" && first != "enroll" && first != "speakers" &&
 			first != "init" && first != "help" && first != "completion" &&
+			first != "pack" && first != "unpack" &&
 			!strings.HasPrefix(first, "-") {
 			ext := strings.ToLower(filepath.Ext(first))
 			if audioExtensions[ext] {
