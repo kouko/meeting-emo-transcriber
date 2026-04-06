@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"regexp"
 	"strconv"
+	"strings"
 )
 
 // audioInfo holds detected audio format metadata.
@@ -69,34 +70,91 @@ func DetectFormat(ffmpegPath, inputPath string) (audioInfo, error) {
 	return info, nil
 }
 
-// buildFFmpegArgs constructs conversion arguments:
-// -y -i <input> -acodec pcm_s16le -ar 16000 -ac 1 <output>
-func buildFFmpegArgs(ffmpegPath, inputPath, outputPath string) []string {
-	return []string{
+// maxVolumeRe matches "max_volume: -5.2 dB" or "max_volume: 8.4 dB" from volumedetect output.
+var maxVolumeRe = regexp.MustCompile(`max_volume:\s*(-?[\d.]+)\s*dB`)
+
+// DetectMaxVolume uses ffmpeg's volumedetect filter to find the peak volume in dB.
+// Returns the max volume value (e.g. -5.2 or 8.4).
+func DetectMaxVolume(ffmpegPath, inputPath string) (float64, error) {
+	cmd := exec.Command(ffmpegPath, "-i", inputPath, "-af", "volumedetect", "-f", "null", "-")
+	out, _ := cmd.CombinedOutput() // ffmpeg writes stats to stderr
+	m := maxVolumeRe.FindStringSubmatch(string(out))
+	if m == nil {
+		return 0, fmt.Errorf("volumedetect: could not parse max_volume from output")
+	}
+	vol, err := strconv.ParseFloat(m[1], 64)
+	if err != nil {
+		return 0, fmt.Errorf("volumedetect: parse float %q: %w", m[1], err)
+	}
+	return vol, nil
+}
+
+// ConvertOpts holds optional parameters for ConvertToWAV.
+type ConvertOpts struct {
+	Normalize bool // force loudnorm normalization
+}
+
+// buildFFmpegArgs constructs conversion arguments.
+// If normalize is true, applies loudnorm filter.
+// If attenuateDB is non-empty (e.g. "-8.4dB"), applies volume attenuation to prevent clipping.
+func buildFFmpegArgs(ffmpegPath, inputPath, outputPath string, filters ...string) []string {
+	args := []string{
 		ffmpegPath,
 		"-y",
 		"-i", inputPath,
+	}
+	if len(filters) > 0 {
+		af := strings.Join(filters, ",")
+		args = append(args, "-af", af)
+	}
+	args = append(args,
 		"-acodec", "pcm_s16le",
 		"-ar", "16000",
 		"-ac", "1",
 		outputPath,
-	}
+	)
+	return args
 }
 
 // ConvertToWAV converts any audio to 16kHz mono PCM WAV.
 // If already target format, copies the file instead.
-func ConvertToWAV(ffmpegPath, inputPath, outputPath string) error {
+// Automatically detects and attenuates audio that exceeds 0dB to prevent clipping.
+// If opts.Normalize is true, applies loudnorm regardless of volume level.
+func ConvertToWAV(ffmpegPath, inputPath, outputPath string, opts ...ConvertOpts) error {
+	var opt ConvertOpts
+	if len(opts) > 0 {
+		opt = opts[0]
+	}
+
 	info, err := DetectFormat(ffmpegPath, inputPath)
 	if err != nil {
 		return fmt.Errorf("DetectFormat: %w", err)
 	}
 
-	if isTargetFormat(info) {
+	// Determine audio filter chain
+	var filters []string
+
+	if opt.Normalize {
+		// User explicitly requested loudnorm
+		filters = append(filters, "loudnorm=I=-16:TP=-1.5:LRA=11")
+		fmt.Fprintf(os.Stderr, "  Applying loudnorm normalization\n")
+	} else {
+		// Auto-detect clipping: only attenuate if max_volume > 0dB
+		maxVol, detectErr := DetectMaxVolume(ffmpegPath, inputPath)
+		if detectErr == nil && maxVol > 0 {
+			// Attenuate by the excess amount + 1dB headroom
+			attenuation := -(maxVol + 1.0)
+			filters = append(filters, fmt.Sprintf("volume=%.1fdB", attenuation))
+			fmt.Fprintf(os.Stderr, "  Detected peak %.1fdB > 0dB, attenuating by %.1fdB to prevent clipping\n", maxVol, -attenuation)
+		}
+	}
+
+	// If no filters needed and already target format, just copy
+	if len(filters) == 0 && isTargetFormat(info) {
 		return copyFile(inputPath, outputPath)
 	}
 
-	args := buildFFmpegArgs(ffmpegPath, inputPath, outputPath)
-	// args[0] is ffmpegPath, rest are the actual arguments
+	args := buildFFmpegArgs(ffmpegPath, inputPath, outputPath, filters...)
 	cmd := exec.Command(args[0], args[1:]...)
 	out, err := cmd.CombinedOutput()
 	if err != nil {

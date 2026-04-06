@@ -32,6 +32,7 @@ func newTranscribeCmd() *cobra.Command {
 		numSpeakers    int
 		learn          bool
 		enhance        bool
+		normalize      bool
 		prompt         string
 	)
 	cmd := &cobra.Command{
@@ -90,7 +91,8 @@ func newTranscribeCmd() *cobra.Command {
 
 			fmt.Fprintf(os.Stderr, "[3/8] Converting audio to WAV...\n")
 			tempWavPath := filepath.Join(tmpDir, "audio.wav")
-			if err := audio.ConvertToWAV(bins.FFmpeg, inputPath, tempWavPath); err != nil {
+			convOpts := audio.ConvertOpts{Normalize: normalize}
+			if err := audio.ConvertToWAV(bins.FFmpeg, inputPath, tempWavPath, convOpts); err != nil {
 				return fmt.Errorf("convert to WAV: %w", err)
 			}
 
@@ -326,6 +328,7 @@ func newTranscribeCmd() *cobra.Command {
 	cmd.Flags().IntVar(&numSpeakers, "num-speakers", 0, "expected number of speakers (0 = auto-detect)")
 	cmd.Flags().BoolVarP(&learn, "learning-mode", "l", false, "create folders for all clusters (including matched) for manual review")
 	cmd.Flags().BoolVar(&enhance, "enhance", false, "enhance audio with DeepFilterNet3 noise reduction before processing")
+	cmd.Flags().BoolVar(&normalize, "normalize", false, "apply loudnorm normalization (auto-attenuates >0dB clipping regardless)")
 	cmd.Flags().StringVar(&prompt, "prompt", "", "custom vocabulary/context hints for ASR (comma-separated)")
 	cmd.MarkFlagRequired("input")
 	return cmd
