@@ -8,7 +8,7 @@ type ModelInfo struct {
 	URL       string
 	SHA256    string
 	Size      int64  // bytes, for progress display
-	Category  string // "asr" | "vad" | "speaker" | "emotion"
+	Category  string // "asr" | "emotion"
 	IsArchive bool   // true if the download is a compressed archive (e.g. .tar.bz2)
 }
 
@@ -17,23 +17,30 @@ var Registry = map[string]ModelInfo{
 	"ggml-large-v3": {
 		Name:     "ggml-large-v3",
 		URL:      "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3.bin",
-		SHA256:   "", // Populated after first download
+		SHA256:   "",
 		Size:     3100000000,
 		Category: "asr",
 	},
-	"silero-vad-v6.2.0": {
-		Name:     "silero-vad-v6.2.0",
-		URL:      "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-silero-v6.2.0.bin",
+	"ggml-breeze-asr-25-q5k": {
+		Name:     "ggml-breeze-asr-25-q5k",
+		URL:      "https://huggingface.co/alan314159/Breeze-ASR-25-whispercpp/resolve/main/ggml-model-q5_k.bin",
 		SHA256:   "",
-		Size:     2000000,
-		Category: "vad",
+		Size:     1100000000,
+		Category: "asr",
 	},
-	"campplus-sv-zh-cn": {
-		Name:     "campplus-sv-zh-cn",
-		URL:      "https://github.com/k2-fsa/sherpa-onnx/releases/download/speaker-recongition-models/3dspeaker_speech_campplus_sv_zh-cn_16k-common_advanced.onnx",
+	"ggml-belle-zh": {
+		Name:     "ggml-belle-zh",
+		URL:      "https://huggingface.co/BELLE-2/Belle-whisper-large-v3-turbo-zh-ggml/resolve/main/ggml-model.bin",
 		SHA256:   "",
-		Size:     30000000,
-		Category: "speaker",
+		Size:     1500000000,
+		Category: "asr",
+	},
+	"ggml-kotoba-whisper-v2.0": {
+		Name:     "ggml-kotoba-whisper-v2.0",
+		URL:      "https://huggingface.co/kotoba-tech/kotoba-whisper-v2.0-ggml/resolve/main/ggml-kotoba-whisper-v2.0.bin",
+		SHA256:   "",
+		Size:     1520000000,
+		Category: "asr",
 	},
 	"sensevoice-small-int8": {
 		Name:      "sensevoice-small-int8",
@@ -43,12 +50,28 @@ var Registry = map[string]ModelInfo{
 		Category:  "emotion",
 		IsArchive: true,
 	},
+	"ct-punc-zh-en-int8": {
+		Name:      "ct-punc-zh-en-int8",
+		URL:       "https://github.com/k2-fsa/sherpa-onnx/releases/download/punctuation-models/sherpa-onnx-punct-ct-transformer-zh-en-vocab272727-2024-04-12-int8.tar.bz2",
+		SHA256:    "",
+		Size:      62000000,
+		Category:  "punctuation",
+		IsArchive: true,
+	},
 }
 
-// ResolveASRModel returns the model name to use for a given language.
-// Phase 2: all languages use ggml-large-v3.
+// ResolveASRModel returns the model name for a given language.
 func ResolveASRModel(language string) string {
-	return "ggml-large-v3"
+	switch language {
+	case "zh-TW":
+		return "ggml-breeze-asr-25-q5k"
+	case "zh":
+		return "ggml-belle-zh"
+	case "ja":
+		return "ggml-kotoba-whisper-v2.0"
+	default: // auto, en
+		return "ggml-large-v3"
+	}
 }
 
 // modelFilename returns the local filename (or directory name for archives) for a model.

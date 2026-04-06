@@ -4,9 +4,28 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/kouko/meeting-emo-transcriber/internal/types"
 )
+
+// sanitizeUTF8 removes invalid UTF-8 bytes from a string.
+func sanitizeUTF8(s string) string {
+	if utf8.ValidString(s) {
+		return s
+	}
+	var b strings.Builder
+	for i := 0; i < len(s); {
+		r, size := utf8.DecodeRuneInString(s[i:])
+		if r == utf8.RuneError && size == 1 {
+			i++ // skip invalid byte
+			continue
+		}
+		b.WriteRune(r)
+		i += size
+	}
+	return b.String()
+}
 
 // ParseSRTTimestamp parses "HH:MM:SS,mmm" into seconds as float64.
 func ParseSRTTimestamp(ts string) (float64, error) {
@@ -46,6 +65,7 @@ func ParseSRTTimestamp(ts string) (float64, error) {
 // ParseSRT parses SRT-formatted text into ASRResult slices.
 // language is passed through to each result (whisper SRT has no language metadata).
 func ParseSRT(content string, language string) ([]types.ASRResult, error) {
+	content = sanitizeUTF8(content)
 	content = strings.TrimSpace(content)
 	if content == "" {
 		return nil, nil

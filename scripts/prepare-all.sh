@@ -3,7 +3,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
-OUTPUT_DIR="$PROJECT_ROOT/embedded/binaries/darwin-arm64"
+OUTPUT_DIR="$PROJECT_ROOT/embedded/bin/darwin-arm64"
 
 echo "=========================================="
 echo "  Preparing all embedded binaries"
@@ -14,13 +14,17 @@ bash "$SCRIPT_DIR/build-whisper.sh"
 echo ""
 bash "$SCRIPT_DIR/download-ffmpeg.sh"
 echo ""
+bash "$SCRIPT_DIR/build-diarize.sh"
+echo ""
+bash "$SCRIPT_DIR/build-denoise.sh"
+echo ""
 
 echo "=========================================="
 echo "  Verification"
 echo "=========================================="
 
 PASS=true
-for f in whisper-cli ffmpeg; do
+for f in whisper-cli ffmpeg metr-diarize metr-denoise; do
     if [ -f "$OUTPUT_DIR/$f" ]; then
         SIZE=$(ls -lh "$OUTPUT_DIR/$f" | awk '{print $5}')
         echo "  ✓ $f ($SIZE)"
@@ -41,7 +45,7 @@ fi
 echo ""
 if [ "$PASS" = true ]; then
     echo "All binaries ready. You can now build with:"
-    echo "  go build -tags embed -o meeting-emo-transcriber ./cmd/main.go"
+    echo "  make build"
 else
     echo "ERROR: Some binaries are missing. Fix the errors above and re-run."
     exit 1

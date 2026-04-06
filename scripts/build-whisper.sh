@@ -4,7 +4,7 @@ set -euo pipefail
 WHISPER_VERSION="v1.7.3"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
-OUTPUT_DIR="$PROJECT_ROOT/embedded/binaries/darwin-arm64"
+OUTPUT_DIR="$PROJECT_ROOT/embedded/bin/darwin-arm64"
 BUILD_DIR="$PROJECT_ROOT/.build/whisper.cpp"
 
 echo "=== Building whisper-cli $WHISPER_VERSION ==="
@@ -30,7 +30,17 @@ cmake -B build \
 cmake --build build --config Release -j"$(sysctl -n hw.ncpu)"
 
 mkdir -p "$OUTPUT_DIR"
-cp build/bin/whisper-cli "$OUTPUT_DIR/whisper-cli"
+
+# v1.7.3 builds as "main", newer versions as "whisper-cli"
+if [ -f build/bin/whisper-cli ]; then
+    cp build/bin/whisper-cli "$OUTPUT_DIR/whisper-cli"
+elif [ -f build/bin/main ]; then
+    cp build/bin/main "$OUTPUT_DIR/whisper-cli"
+else
+    echo "ERROR: Could not find whisper-cli or main in build/bin/"
+    ls build/bin/
+    exit 1
+fi
 chmod 755 "$OUTPUT_DIR/whisper-cli"
 
 echo "whisper-cli built: $OUTPUT_DIR/whisper-cli"
@@ -39,7 +49,8 @@ ls -lh "$OUTPUT_DIR/whisper-cli"
 VAD_MODEL="$OUTPUT_DIR/ggml-silero-v6.2.0.bin"
 if [ ! -f "$VAD_MODEL" ]; then
     echo "Downloading Silero VAD model..."
-    bash "$BUILD_DIR/models/download-vad-model.sh"
-    cp "$BUILD_DIR/models/ggml-silero-v6.2.0.bin" "$VAD_MODEL"
+    VAD_URL="https://huggingface.co/ggml-org/whisper-vad/resolve/main/ggml-silero-v6.2.0.bin"
+    curl -L -o "$VAD_MODEL" "$VAD_URL"
 fi
 echo "VAD model: $VAD_MODEL"
+ls -lh "$VAD_MODEL"

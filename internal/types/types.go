@@ -37,19 +37,31 @@ type Metadata struct {
 	Date               string `json:"date"`
 }
 
+// SpeakerProfile stores speaker voiceprints from one or more sources.
+// Multiple *.profile.json files in a speaker directory are merged on load.
 type SpeakerProfile struct {
-	Name       string            `json:"name"`
-	Embeddings []SampleEmbedding `json:"embeddings"`
-	Dim        int               `json:"dim"`
-	Model      string            `json:"model"`
-	CreatedAt  string            `json:"created_at"`
-	UpdatedAt  string            `json:"updated_at"`
+	Name             string       `json:"-"`                  // speaker directory name (not stored in JSON)
+	CreatedAt        string       `json:"created_at"`         // first created
+	UpdatedAt        string       `json:"updated_at"`         // last modified
+	KnownAudioHashes []string    `json:"known_audio_hashes"` // hashes of auto-generated wav files
+	Voiceprints      []Voiceprint `json:"voiceprints"`        // one or more voiceprints from different sources
 }
 
-type SampleEmbedding struct {
-	File      string    `json:"file"`
-	Hash      string    `json:"hash"`
-	Embedding []float32 `json:"embedding"`
+// Voiceprint model constants
+const (
+	VoiceprintModel      = "fluidaudio_embedding_v1"
+	VoiceprintProjection = "none"
+)
+
+// Voiceprint is a speaker identity vector with its provenance metadata.
+type Voiceprint struct {
+	Source     string    `json:"source"`     // source audio file name
+	CreatedAt  string   `json:"created_at"` // when this voiceprint was computed
+	Dim        int      `json:"dim"`        // vector dimension (256 for WeSpeaker)
+	Model      string   `json:"model"`      // embedding model
+	Projection string   `json:"projection"` // projection method
+	Type       string   `json:"type"`       // "centroid" (from diarization) or "extracted" (from single wav)
+	Vector     []float32 `json:"vector"`    // the voiceprint vector
 }
 
 type MatchResult struct {

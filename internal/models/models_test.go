@@ -6,19 +6,28 @@ import (
 )
 
 func TestResolveASRModel(t *testing.T) {
-	cases := []string{"auto", "en", "zh-TW", "zh", "ja", "unknown"}
-	for _, lang := range cases {
-		t.Run(lang, func(t *testing.T) {
-			got := ResolveASRModel(lang)
-			if got != "ggml-large-v3" {
-				t.Errorf("ResolveASRModel(%q) = %q; want %q", lang, got, "ggml-large-v3")
+	tests := []struct {
+		lang, want string
+	}{
+		{"auto", "ggml-large-v3"},
+		{"en", "ggml-large-v3"},
+		{"zh-TW", "ggml-breeze-asr-25-q5k"},
+		{"zh", "ggml-belle-zh"},
+		{"ja", "ggml-kotoba-whisper-v2.0"},
+		{"unknown", "ggml-large-v3"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.lang, func(t *testing.T) {
+			got := ResolveASRModel(tt.lang)
+			if got != tt.want {
+				t.Errorf("ResolveASRModel(%q) = %q; want %q", tt.lang, got, tt.want)
 			}
 		})
 	}
 }
 
 func TestRegistryContainsRequiredModels(t *testing.T) {
-	required := []string{"ggml-large-v3", "silero-vad-v6.2.0"}
+	required := []string{"ggml-large-v3", "sensevoice-small-int8", "ct-punc-zh-en-int8"}
 	for _, name := range required {
 		t.Run(name, func(t *testing.T) {
 			if _, ok := Registry[name]; !ok {
@@ -51,19 +60,6 @@ func TestModelsDir(t *testing.T) {
 	}
 }
 
-func TestRegistryContainsSpeakerModel(t *testing.T) {
-	info, ok := Registry["campplus-sv-zh-cn"]
-	if !ok {
-		t.Fatal("Registry missing campplus-sv-zh-cn")
-	}
-	if info.Category != "speaker" {
-		t.Errorf("Category = %q, want \"speaker\"", info.Category)
-	}
-	if info.URL == "" {
-		t.Error("URL is empty")
-	}
-}
-
 func TestRegistryContainsEmotionModel(t *testing.T) {
 	info, ok := Registry["sensevoice-small-int8"]
 	if !ok {
@@ -77,12 +73,24 @@ func TestRegistryContainsEmotionModel(t *testing.T) {
 	}
 }
 
+func TestRegistryContainsPunctuationModel(t *testing.T) {
+	info, ok := Registry["ct-punc-zh-en-int8"]
+	if !ok {
+		t.Fatal("Registry missing ct-punc-zh-en-int8")
+	}
+	if info.Category != "punctuation" {
+		t.Errorf("Category = %q, want \"punctuation\"", info.Category)
+	}
+	if !info.IsArchive {
+		t.Error("expected IsArchive = true for ct-punc")
+	}
+}
+
 func TestModelFilename(t *testing.T) {
 	tests := []struct {
 		name, url, expected string
 	}{
 		{"ggml-large-v3", "https://example.com/model.bin", "ggml-large-v3.bin"},
-		{"campplus-sv-zh-cn", "https://example.com/model.onnx", "campplus-sv-zh-cn.onnx"},
 		{"sensevoice-small-int8", "https://example.com/archive.tar.bz2", "sensevoice-small-int8"},
 	}
 	for _, tt := range tests {

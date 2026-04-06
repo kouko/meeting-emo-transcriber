@@ -11,8 +11,8 @@ func TestDefaults(t *testing.T) {
 	if cfg.Language != "auto" {
 		t.Errorf("Language = %q, want auto", cfg.Language)
 	}
-	if cfg.Threshold != 0.6 {
-		t.Errorf("Threshold = %f, want 0.6", cfg.Threshold)
+	if cfg.Threshold != 0.8 {
+		t.Errorf("Threshold = %f, want 0.8", cfg.Threshold)
 	}
 	if cfg.Format != "txt" {
 		t.Errorf("Format = %q, want txt", cfg.Format)

@@ -45,10 +45,10 @@ func TestMaxSimilarityStrategy_BestMatch(t *testing.T) {
 	strategy := &MaxSimilarityStrategy{}
 	profile := types.SpeakerProfile{
 		Name: "TestUser",
-		Embeddings: []types.SampleEmbedding{
-			{Embedding: []float32{1, 0, 0}},
-			{Embedding: []float32{0, 1, 0}},
-			{Embedding: []float32{0.7, 0.7, 0}},
+		Voiceprints: []types.Voiceprint{
+			{Vector: []float32{1, 0, 0}},
+			{Vector: []float32{0, 1, 0}},
+			{Vector: []float32{0.7, 0.7, 0}},
 		},
 	}
 	query := []float32{0.71, 0.71, 0}
@@ -61,8 +61,8 @@ func TestMaxSimilarityStrategy_BestMatch(t *testing.T) {
 func TestMatcherMatch_AboveThreshold(t *testing.T) {
 	matcher := NewMatcher(&MaxSimilarityStrategy{})
 	profiles := []types.SpeakerProfile{
-		{Name: "Alice", Embeddings: []types.SampleEmbedding{{Embedding: []float32{1, 0, 0}}}},
-		{Name: "Bob", Embeddings: []types.SampleEmbedding{{Embedding: []float32{0, 1, 0}}}},
+		{Name: "Alice", Voiceprints: []types.Voiceprint{{Vector: []float32{1, 0, 0}}}},
+		{Name: "Bob", Voiceprints: []types.Voiceprint{{Vector: []float32{0, 1, 0}}}},
 	}
 	result := matcher.Match([]float32{0.99, 0.1, 0}, profiles, 0.6)
 	if result.Name != "Alice" {
@@ -73,7 +73,7 @@ func TestMatcherMatch_AboveThreshold(t *testing.T) {
 func TestMatcherMatch_BelowThreshold(t *testing.T) {
 	matcher := NewMatcher(&MaxSimilarityStrategy{})
 	profiles := []types.SpeakerProfile{
-		{Name: "Alice", Embeddings: []types.SampleEmbedding{{Embedding: []float32{1, 0, 0}}}},
+		{Name: "Alice", Voiceprints: []types.Voiceprint{{Vector: []float32{1, 0, 0}}}},
 	}
 	result := matcher.Match([]float32{0, 1, 0}, profiles, 0.6)
 	if result.Name != "" {

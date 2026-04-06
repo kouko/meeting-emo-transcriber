@@ -5,10 +5,10 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/kouko/meeting-emo-transcriber/embedded"
 	"github.com/kouko/meeting-emo-transcriber/internal/audio"
 	"github.com/kouko/meeting-emo-transcriber/internal/config"
-	"github.com/kouko/meeting-emo-transcriber/internal/embedded"
-	"github.com/kouko/meeting-emo-transcriber/internal/models"
+	"github.com/kouko/meeting-emo-transcriber/internal/diarize"
 	"github.com/kouko/meeting-emo-transcriber/internal/speaker"
 	"github.com/kouko/meeting-emo-transcriber/internal/types"
 	"github.com/spf13/cobra"
@@ -40,12 +40,17 @@ func newSpeakersListCmd() *cobra.Command {
 			}
 			for _, name := range names {
 				files, _ := store.ListAudioFiles(name)
-				needsUpdate, _ := store.NeedsUpdate(name)
-				status := "enrolled"
-				if needsUpdate {
-					status = "needs enrollment"
+				profile, _ := store.LoadProfile(name)
+				status := "no profile"
+				if profile != nil && len(profile.Voiceprints) > 0 {
+					newFiles, _ := store.FindNewAudioFiles(name)
+					if len(newFiles) > 0 {
+						status = fmt.Sprintf("enrolled, %d new samples", len(newFiles))
+					} else {
+						status = fmt.Sprintf("enrolled, %d voiceprints", len(profile.Voiceprints))
+					}
 				}
-				fmt.Printf("  %s: %d samples (%s)\n", name, len(files), status)
+				fmt.Printf("  %s: %d audio files (%s)\n", name, len(files), status)
 			}
 			return nil
 		},
@@ -71,8 +76,8 @@ func newSpeakersVerifyCmd() *cobra.Command {
 			if profile == nil {
 				return fmt.Errorf("speaker %q not found in %s", name, speakersDir)
 			}
-			if len(profile.Embeddings) == 0 {
-				return fmt.Errorf("speaker %q has no embeddings (run enroll first)", name)
+			if len(profile.Voiceprints) == 0 {
+				return fmt.Errorf("speaker %q has no voiceprints (run enroll first)", name)
 			}
 
 			bins, err := embedded.ExtractAll()
@@ -80,17 +85,7 @@ func newSpeakersVerifyCmd() *cobra.Command {
 				return fmt.Errorf("extract binaries: %w", err)
 			}
 
-			speakerModelPath, err := models.EnsureModel("campplus-sv-zh-cn")
-			if err != nil {
-				return fmt.Errorf("ensure speaker model: %w", err)
-			}
-
-			extractor, err := speaker.NewExtractor(speakerModelPath, cfg.Threads)
-			if err != nil {
-				return fmt.Errorf("create extractor: %w", err)
-			}
-			defer extractor.Close()
-
+			// Convert test audio to WAV
 			tmpDir, err := os.MkdirTemp("", "met-verify-*")
 			if err != nil {
 				return fmt.Errorf("create temp dir: %w", err)
@@ -102,16 +97,18 @@ func newSpeakersVerifyCmd() *cobra.Command {
 				return fmt.Errorf("convert audio: %w", err)
 			}
 
-			samples, sampleRate, err := audio.ReadWAV(tempWav)
+			// Extract voiceprint via FluidAudio WeSpeaker (256-dim)
+			vpResult, err := diarize.ExtractVoiceprint(bins.Diarize, tempWav)
 			if err != nil {
-				return fmt.Errorf("read audio: %w", err)
+				return fmt.Errorf("extract voiceprint: %w", err)
 			}
 
-			testEmb, err := extractor.Extract(samples, sampleRate)
-			if err != nil {
-				return fmt.Errorf("extract embedding: %w", err)
+			testEmb := make([]float32, len(vpResult.Vector))
+			for i, v := range vpResult.Vector {
+				testEmb[i] = float32(v)
 			}
 
+			// Match against enrolled profile
 			matcher := speaker.NewMatcher(&speaker.MaxSimilarityStrategy{})
 			result := matcher.Match(testEmb, []types.SpeakerProfile{*profile}, float32(cfg.Threshold))
 

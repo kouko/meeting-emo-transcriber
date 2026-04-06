@@ -3,6 +3,7 @@ package emotion
 import (
 	"fmt"
 	"path/filepath"
+	"strings"
 
 	sherpa "github.com/k2-fsa/sherpa-onnx-go-macos"
 	"github.com/kouko/meeting-emo-transcriber/internal/types"
@@ -51,8 +52,9 @@ func (c *Classifier) Classify(samples []float32, sampleRate int) (types.EmotionR
 		return types.EmotionResult{}, "", fmt.Errorf("no result from emotion classifier")
 	}
 
-	emotionRaw := result.Emotion
-	audioEvent := result.Event
+	// SenseVoice returns tags like "<|HAPPY|>" and "<|Speech|>" — strip markers
+	emotionRaw := strings.TrimPrefix(strings.TrimSuffix(result.Emotion, "|>"), "<|")
+	audioEvent := strings.TrimPrefix(strings.TrimSuffix(result.Event, "|>"), "<|")
 	if audioEvent == "" {
 		audioEvent = "Speech"
 	}

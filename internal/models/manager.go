@@ -14,7 +14,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/kouko/meeting-emo-transcriber/internal/embedded"
+	"github.com/kouko/meeting-emo-transcriber/embedded"
 )
 
 // manifestFile is the name of the JSON file that tracks downloaded models.
@@ -206,19 +206,29 @@ func ensureArchiveModel(name string, info ModelInfo, modelsDir, destDir string, 
 		return "", fmt.Errorf("extract %s: %w\nstderr: %s", name, err, stderr.String())
 	}
 
-	// Find extracted directory and rename to destDir.
+	// Find the newly extracted directory and rename to destDir.
+	// Archives extract to a directory whose name may not contain the registry name.
+	// Strategy: derive expected prefix from URL filename (strip .tar.bz2).
+	archiveBaseName := filepath.Base(info.URL)
+	archiveBaseName = strings.TrimSuffix(archiveBaseName, ".tar.bz2")
+
 	entries, err := os.ReadDir(modelsDir)
 	if err != nil {
 		return "", fmt.Errorf("read models dir: %w", err)
 	}
 	for _, entry := range entries {
-		if entry.IsDir() && strings.Contains(entry.Name(), "sherpa-onnx-sense-voice") {
-			extractedDir := filepath.Join(modelsDir, entry.Name())
-			if extractedDir != destDir {
-				os.RemoveAll(destDir)
-				if err := os.Rename(extractedDir, destDir); err != nil {
-					return "", fmt.Errorf("rename %s to %s: %w", extractedDir, destDir, err)
-				}
+		if !entry.IsDir() {
+			continue
+		}
+		extractedDir := filepath.Join(modelsDir, entry.Name())
+		if extractedDir == destDir {
+			continue
+		}
+		// Match by registry name substring OR archive base name
+		if strings.Contains(entry.Name(), name) || entry.Name() == archiveBaseName {
+			os.RemoveAll(destDir)
+			if err := os.Rename(extractedDir, destDir); err != nil {
+				return "", fmt.Errorf("rename %s to %s: %w", extractedDir, destDir, err)
 			}
 			break
 		}

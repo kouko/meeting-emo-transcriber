@@ -4,6 +4,8 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"strconv"
+	"strings"
 	"testing"
 )
 
@@ -104,9 +106,8 @@ func TestBuildFFmpegArgs(t *testing.T) {
 
 	// Verify all required flags are present
 	flagMap := make(map[string]bool)
-	for i, arg := range args {
+	for _, arg := range args {
 		flagMap[arg] = true
-		_ = i
 	}
 
 	required := []string{"-y", "-i", "-acodec", "-ar", "-ac"}
@@ -114,6 +115,11 @@ func TestBuildFFmpegArgs(t *testing.T) {
 		if !flagMap[flag] {
 			t.Errorf("missing flag %q in args: %v", flag, args)
 		}
+	}
+
+	// No -af when no filters
+	if flagMap["-af"] {
+		t.Errorf("should not have -af when no filters: %v", args)
 	}
 
 	// Verify input and output paths appear
@@ -150,6 +156,74 @@ func TestBuildFFmpegArgs(t *testing.T) {
 		if arg == "-ac" && i+1 < len(args) && args[i+1] != "1" {
 			t.Errorf("-ac value: got %q, want %q", args[i+1], "1")
 		}
+	}
+}
+
+func TestBuildFFmpegArgsWithFilters(t *testing.T) {
+	// Single filter
+	args := buildFFmpegArgs("/usr/bin/ffmpeg", "in.wav", "out.wav", "volume=-5.0dB")
+	joined := strings.Join(args, " ")
+	if !strings.Contains(joined, "-af volume=-5.0dB") {
+		t.Errorf("expected -af with volume filter, got: %s", joined)
+	}
+
+	// Multiple filters should be comma-joined
+	args = buildFFmpegArgs("/usr/bin/ffmpeg", "in.wav", "out.wav", "volume=-5.0dB", "loudnorm=I=-16")
+	joined = strings.Join(args, " ")
+	if !strings.Contains(joined, "-af volume=-5.0dB,loudnorm=I=-16") {
+		t.Errorf("expected comma-joined filters, got: %s", joined)
+	}
+}
+
+func TestDetectMaxVolumeRegex(t *testing.T) {
+	tests := []struct {
+		name    string
+		output  string
+		want    float64
+		wantErr bool
+	}{
+		{
+			name:   "positive peak (clipping)",
+			output: "[Parsed_volumedetect_0 @ 0x...] max_volume: 8.4 dB",
+			want:   8.4,
+		},
+		{
+			name:   "negative peak (normal)",
+			output: "[Parsed_volumedetect_0 @ 0x...] max_volume: -5.2 dB",
+			want:   -5.2,
+		},
+		{
+			name:   "zero peak",
+			output: "[Parsed_volumedetect_0 @ 0x...] max_volume: 0.0 dB",
+			want:   0.0,
+		},
+		{
+			name:    "no match",
+			output:  "some random ffmpeg output",
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			m := maxVolumeRe.FindStringSubmatch(tt.output)
+			if tt.wantErr {
+				if m != nil {
+					t.Error("expected no match, got match")
+				}
+				return
+			}
+			if m == nil {
+				t.Fatal("expected match, got nil")
+			}
+			got, err := strconv.ParseFloat(m[1], 64)
+			if err != nil {
+				t.Fatalf("parse error: %v", err)
+			}
+			if got != tt.want {
+				t.Errorf("got %.1f, want %.1f", got, tt.want)
+			}
+		})
 	}
 }
 
