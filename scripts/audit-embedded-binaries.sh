@@ -121,8 +121,16 @@ check_binary() {
   # Weak deps are skipped in both cases because dyld tolerates them
   # being missing. Match on the whole line first to filter out weak
   # entries, then extract the dep path.
+  # otool -L prints a section header for each architecture in a fat
+  # binary, e.g. "/path/to/bin (architecture arm64):". Those headers do
+  # NOT start with whitespace; real dep lines DO start with a tab.
+  # Filter to whitespace-prefixed lines so we skip every architecture
+  # header as well as the top-level binary header. This was caught
+  # while porting the audit to youtube-summarize-scraper — ytss embeds
+  # a universal yt-dlp binary which triggered false positives.
   local nonweak_deps
-  nonweak_deps="$(otool -L "$bin" 2>/dev/null | tail -n +2 \
+  nonweak_deps="$(otool -L "$bin" 2>/dev/null \
+    | grep -E '^[[:space:]]' \
     | grep -v ', weak)$' \
     | awk '{print $1}' \
     || true)"
