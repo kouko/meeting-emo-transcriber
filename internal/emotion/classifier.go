@@ -1,78 +1,62 @@
+// Package emotion classifies speech emotion and detects audio events
+// using the SenseVoice model. The model is not loaded in-process; this
+// package is a thin wrapper over a sherpasidecar.Client that owns the
+// underlying sherpa C++ object in a sidecar subprocess.
 package emotion
 
 import (
 	"fmt"
-	"path/filepath"
-	"strings"
 
-	sherpa "github.com/k2-fsa/sherpa-onnx-go-macos"
+	"github.com/kouko/meeting-emo-transcriber/internal/sherpasidecar"
 	"github.com/kouko/meeting-emo-transcriber/internal/types"
 )
 
-// Classifier wraps sherpa-onnx OfflineRecognizer with SenseVoice model
-// for emotion classification and audio event detection.
-type Classifier struct {
-	inner *sherpa.OfflineRecognizer
+// sidecarClient is the minimal interface the Classifier needs. Kept
+// concrete-type-friendly with a separate ClassifyResult shape so test
+// fakes don't have to import sherpasidecar.
+type sidecarClient interface {
+	LoadClassifier(modelDir string, threads int) error
+	Classify(samples []float32, sampleRate int) (sherpasidecar.ClassifyResult, error)
 }
 
-// NewClassifier creates an emotion classifier from a SenseVoice model directory.
-// modelDir should contain model.int8.onnx and tokens.txt.
-func NewClassifier(modelDir string, threads int) (*Classifier, error) {
-	modelPath := filepath.Join(modelDir, "model.int8.onnx")
-	tokensPath := filepath.Join(modelDir, "tokens.txt")
+// Classifier performs emotion + audio-event classification via a
+// sherpasidecar client. The underlying SenseVoice model lives in the
+// sidecar process.
+type Classifier struct {
+	client sidecarClient
+}
 
-	config := &sherpa.OfflineRecognizerConfig{}
-	config.ModelConfig.SenseVoice.Model = modelPath
-	config.ModelConfig.SenseVoice.Language = ""
-	config.ModelConfig.SenseVoice.UseInverseTextNormalization = 0
-	config.ModelConfig.Tokens = tokensPath
-	config.ModelConfig.NumThreads = threads
-	config.ModelConfig.Debug = 0
-	config.ModelConfig.Provider = "cpu"
-
-	inner := sherpa.NewOfflineRecognizer(config)
-	if inner == nil {
-		return nil, fmt.Errorf("failed to create emotion classifier from %s", modelDir)
+// NewClassifier loads the SenseVoice emotion model into the sidecar and
+// returns a Classifier that routes Classify calls through it. The caller
+// owns the client's lifecycle.
+func NewClassifier(client sidecarClient, modelDir string, threads int) (*Classifier, error) {
+	if client == nil {
+		return nil, fmt.Errorf("emotion: client is nil")
 	}
-
-	return &Classifier{inner: inner}, nil
+	if err := client.LoadClassifier(modelDir, threads); err != nil {
+		return nil, fmt.Errorf("load emotion model: %w", err)
+	}
+	return &Classifier{client: client}, nil
 }
 
 // Classify performs emotion classification on audio samples.
 // Returns the EmotionResult (3-layer mapping), audio event string, and error.
 func (c *Classifier) Classify(samples []float32, sampleRate int) (types.EmotionResult, string, error) {
-	stream := sherpa.NewOfflineStream(c.inner)
-	defer sherpa.DeleteOfflineStream(stream)
-
-	stream.AcceptWaveform(sampleRate, samples)
-	c.inner.Decode(stream)
-	result := stream.GetResult()
-
-	if result == nil {
-		return types.EmotionResult{}, "", fmt.Errorf("no result from emotion classifier")
+	raw, err := c.client.Classify(samples, sampleRate)
+	if err != nil {
+		return types.EmotionResult{}, "", err
 	}
 
-	// SenseVoice returns tags like "<|HAPPY|>" and "<|Speech|>" — strip markers
-	emotionRaw := strings.TrimPrefix(strings.TrimSuffix(result.Emotion, "|>"), "<|")
-	audioEvent := strings.TrimPrefix(strings.TrimSuffix(result.Event, "|>"), "<|")
-	if audioEvent == "" {
-		audioEvent = "Speech"
-	}
-
-	info := types.LookupEmotion(emotionRaw, types.SenseVoiceEmotionMap)
+	info := types.LookupEmotion(raw.Raw, types.SenseVoiceEmotionMap)
 
 	return types.EmotionResult{
 		Raw:        info.Raw,
 		Label:      info.Label,
 		Display:    info.Display,
-		Confidence: 0,
-	}, audioEvent, nil
+		Confidence: raw.Confidence,
+	}, raw.AudioEvent, nil
 }
 
-// Close releases the underlying sherpa-onnx resources.
-func (c *Classifier) Close() {
-	if c.inner != nil {
-		sherpa.DeleteOfflineRecognizer(c.inner)
-		c.inner = nil
-	}
-}
+// Close is a no-op kept for API compatibility. The sidecar client owns
+// the sherpa model's lifetime, not the Classifier.
+func (c *Classifier) Close() {}

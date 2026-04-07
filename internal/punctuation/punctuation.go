@@ -1,35 +1,41 @@
+// Package punctuation adds punctuation to text using the CT-Transformer
+// model. The model is not loaded in-process; this package is a thin
+// wrapper over a sherpasidecar.Client that owns the underlying sherpa C++
+// object in a sidecar subprocess. Keeping the sherpa dependency out of
+// the main metr binary is what makes metr a single-file portable binary.
 package punctuation
 
 import (
 	"fmt"
-	"path/filepath"
 	"strings"
-
-	sherpa "github.com/k2-fsa/sherpa-onnx-go-macos"
 )
 
-// Punctuator wraps sherpa-onnx OfflinePunctuation with CT-Transformer model.
-type Punctuator struct {
-	inner *sherpa.OfflinePunctuation
+// sidecarClient is the minimal interface the Punctuator needs. Defined in
+// this package (not as an exported interface in sherpasidecar) so tests
+// can substitute a fake without pulling in the sidecar spawn machinery.
+type sidecarClient interface {
+	LoadPunctuator(modelDir string, threads int) error
+	Punctuate(text, language string) (string, error)
 }
 
-// NewPunctuator creates a punctuator from a CT-Transformer model directory.
-// modelDir should contain model.int8.onnx.
-func NewPunctuator(modelDir string, threads int) (*Punctuator, error) {
-	modelPath := filepath.Join(modelDir, "model.int8.onnx")
+// Punctuator adds punctuation to text via a sherpasidecar client. The
+// underlying sherpa model lives in the sidecar process.
+type Punctuator struct {
+	client sidecarClient
+}
 
-	config := &sherpa.OfflinePunctuationConfig{}
-	config.Model.CtTransformer = modelPath
-	config.Model.NumThreads = threads
-	config.Model.Debug = 0
-	config.Model.Provider = "cpu"
-
-	inner := sherpa.NewOfflinePunctuation(config)
-	if inner == nil {
-		return nil, fmt.Errorf("failed to create punctuator from %s", modelDir)
+// NewPunctuator loads the CT-Transformer punctuation model into the
+// sidecar and returns a Punctuator that routes AddPunct calls through it.
+// The caller is responsible for the Client's lifecycle (spawn + close);
+// NewPunctuator will not close the client on error.
+func NewPunctuator(client sidecarClient, modelDir string, threads int) (*Punctuator, error) {
+	if client == nil {
+		return nil, fmt.Errorf("punctuation: client is nil")
 	}
-
-	return &Punctuator{inner: inner}, nil
+	if err := client.LoadPunctuator(modelDir, threads); err != nil {
+		return nil, fmt.Errorf("load punctuation model: %w", err)
+	}
+	return &Punctuator{client: client}, nil
 }
 
 // AddPunct adds punctuation to text.
@@ -38,20 +44,22 @@ func (p *Punctuator) AddPunct(text, language string) string {
 	if strings.TrimSpace(text) == "" {
 		return text
 	}
-	result := p.inner.AddPunct(text)
+	result, err := p.client.Punctuate(text, language)
+	if err != nil {
+		// Degrade gracefully: if the sidecar call fails mid-run, return
+		// the unpunctuated text rather than failing the whole transcribe.
+		// The caller already accepts that punctuation is optional.
+		return text
+	}
 	if isEnglish(language) {
 		result = fullwidthToASCII(result)
 	}
 	return result
 }
 
-// Close releases the underlying sherpa-onnx resources.
-func (p *Punctuator) Close() {
-	if p.inner != nil {
-		sherpa.DeleteOfflinePunc(p.inner)
-		p.inner = nil
-	}
-}
+// Close is a no-op kept for API compatibility. The sidecar client owns the
+// sherpa model's lifetime, not the Punctuator.
+func (p *Punctuator) Close() {}
 
 // isEnglish returns true if the language code indicates English.
 func isEnglish(lang string) bool {

@@ -1,48 +1,85 @@
 package emotion
 
 import (
-	"os"
-	"path/filepath"
+	"errors"
 	"testing"
+
+	"github.com/kouko/meeting-emo-transcriber/internal/sherpasidecar"
 )
 
-func TestNewClassifierRequiresModel(t *testing.T) {
-	_, err := NewClassifier("/nonexistent/model", 1)
-	if err == nil {
-		t.Error("expected error for non-existent model path")
+// fakeClient is a test double that records load calls and returns canned
+// responses. It lets us exercise the Classifier wrapper without spawning
+// a real sidecar.
+type fakeClient struct {
+	loadErr     error
+	classifyErr error
+	classifyRes sherpasidecar.ClassifyResult
+
+	loadedModelDir string
+	loadedThreads  int
+}
+
+func (f *fakeClient) LoadClassifier(modelDir string, threads int) error {
+	f.loadedModelDir = modelDir
+	f.loadedThreads = threads
+	return f.loadErr
+}
+
+func (f *fakeClient) Classify(samples []float32, sampleRate int) (sherpasidecar.ClassifyResult, error) {
+	if f.classifyErr != nil {
+		return sherpasidecar.ClassifyResult{}, f.classifyErr
+	}
+	return f.classifyRes, nil
+}
+
+func TestNewClassifierPropagatesLoadError(t *testing.T) {
+	fake := &fakeClient{loadErr: errors.New("boom")}
+	if _, err := NewClassifier(fake, "/tmp/whatever", 1); err == nil {
+		t.Error("expected error when LoadClassifier returns error")
+	}
+	if fake.loadedModelDir != "/tmp/whatever" || fake.loadedThreads != 1 {
+		t.Errorf("load args not forwarded: got modelDir=%q threads=%d", fake.loadedModelDir, fake.loadedThreads)
 	}
 }
 
-func TestClassifyWithModel(t *testing.T) {
-	modelDir := findSenseVoiceModel()
-	if modelDir == "" {
-		t.Skip("SenseVoice model not available, skipping")
+func TestClassifierMapsEmotionRaw(t *testing.T) {
+	fake := &fakeClient{
+		classifyRes: sherpasidecar.ClassifyResult{
+			Raw:        "HAPPY",
+			AudioEvent: "Speech",
+			Confidence: 0.9,
+		},
 	}
-
-	cls, err := NewClassifier(modelDir, 1)
+	cls, err := NewClassifier(fake, "/tmp/x", 2)
 	if err != nil {
 		t.Fatalf("NewClassifier: %v", err)
 	}
-	defer cls.Close()
 
-	// 1 second of silence at 16kHz
-	samples := make([]float32, 16000)
-	result, event, err := cls.Classify(samples, 16000)
+	result, event, err := cls.Classify([]float32{0.1, 0.2}, 16000)
 	if err != nil {
 		t.Fatalf("Classify: %v", err)
 	}
-
-	if result.Label == "" {
-		t.Error("expected non-empty emotion label")
+	if result.Label != "Happy" {
+		t.Errorf("Label = %q, want Happy", result.Label)
 	}
-	t.Logf("Emotion: %+v, Event: %s", result, event)
+	if result.Display != "happily" {
+		t.Errorf("Display = %q, want happily", result.Display)
+	}
+	if result.Confidence != 0.9 {
+		t.Errorf("Confidence = %v, want 0.9", result.Confidence)
+	}
+	if event != "Speech" {
+		t.Errorf("event = %q, want Speech", event)
+	}
 }
 
-func findSenseVoiceModel() string {
-	home, _ := os.UserHomeDir()
-	dir := filepath.Join(home, ".metr", "models", "sensevoice-small-int8")
-	if _, err := os.Stat(filepath.Join(dir, "model.int8.onnx")); err == nil {
-		return dir
+func TestClassifierPropagatesClassifyError(t *testing.T) {
+	fake := &fakeClient{classifyErr: errors.New("stream dead")}
+	cls, err := NewClassifier(fake, "/tmp/x", 1)
+	if err != nil {
+		t.Fatalf("NewClassifier: %v", err)
 	}
-	return ""
+	if _, _, err := cls.Classify(nil, 16000); err == nil {
+		t.Error("expected error to propagate")
+	}
 }
