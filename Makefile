@@ -4,13 +4,13 @@ GOARCH ?= $(shell uname -m | sed 's/x86_64/amd64/' | sed 's/aarch64/arm64/')
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
 LDFLAGS := -X main.version=$(VERSION)
 
-.PHONY: all build clean deps build-deps download-deps test info clean-all package
+.PHONY: all build clean deps build-deps download-deps build-sherpa-sidecar test info clean-all package
 
 # Default: build for current platform
 all: deps build
 
 # Download/build all external dependencies
-deps: build-deps download-deps
+deps: build-deps download-deps build-sherpa-sidecar
 
 build-deps:
 	@echo "==> Building whisper-cli..."
@@ -19,6 +19,15 @@ build-deps:
 	@bash scripts/build-diarize.sh
 	@echo "==> Building metr-denoise..."
 	@bash scripts/build-denoise.sh
+
+# Build the metr-sherpa sidecar + copy sherpa-onnx dylibs into
+# embedded/bin/ so go:embed picks them up. Kept separate from build-deps
+# because it depends on Go module cache being populated (go.sum), which
+# happens on first `go build`, whereas build-deps runs Swift/C++ builds
+# that don't touch Go modules.
+build-sherpa-sidecar:
+	@echo "==> Building metr-sherpa sidecar..."
+	@bash scripts/build-sherpa-sidecar.sh
 
 download-deps:
 	@echo "==> Building ffmpeg (LGPL, from source)..."
@@ -44,7 +53,7 @@ clean:
 	rm -f $(BINARY_NAME) main
 	rm -rf dist/
 
-# Clean everything including deps
+# Clean everything including deps (sidecar binary, dylibs, swift/cpp builds)
 clean-all: clean
 	rm -rf embedded/bin/darwin-arm64/
 	rm -rf .build/

@@ -17,6 +17,7 @@ import (
 	"github.com/kouko/meeting-emo-transcriber/internal/models"
 	"github.com/kouko/meeting-emo-transcriber/internal/output"
 	"github.com/kouko/meeting-emo-transcriber/internal/punctuation"
+	"github.com/kouko/meeting-emo-transcriber/internal/sherpasidecar"
 	"github.com/kouko/meeting-emo-transcriber/internal/speaker"
 	"github.com/kouko/meeting-emo-transcriber/internal/types"
 	"github.com/spf13/cobra"
@@ -84,6 +85,16 @@ Examples:
 			if err != nil {
 				return fmt.Errorf("extract binaries: %w", err)
 			}
+
+			// 3b. Spawn sherpa-onnx sidecar. All punctuation and emotion
+			// work flows through this child process, keeping the main metr
+			// binary cgo-free and single-file portable. The sidecar is
+			// kept alive for the entire transcribe run and closed on exit.
+			sherpaClient, err := sherpasidecar.Spawn(bins.SherpaSidecar)
+			if err != nil {
+				return fmt.Errorf("spawn sherpa sidecar: %w", err)
+			}
+			defer sherpaClient.Close()
 
 			// 4. Ensure ASR model
 			fmt.Fprintf(os.Stderr, "[2/9] Ensuring ASR model...\n")
@@ -153,7 +164,7 @@ Examples:
 			if language != "ja" {
 				puncModelDir, puncErr := models.EnsureModel("ct-punc-zh-en-int8")
 				if puncErr == nil {
-					punc, puncInitErr := punctuation.NewPunctuator(puncModelDir, cfg.Threads)
+					punc, puncInitErr := punctuation.NewPunctuator(sherpaClient, puncModelDir, cfg.Threads)
 					if puncInitErr == nil {
 						fmt.Fprintf(os.Stderr, "[5/9] Punctuation model loaded\n")
 						defer punc.Close()
@@ -234,7 +245,7 @@ Examples:
 			if err != nil {
 				return fmt.Errorf("ensure emotion model: %w", err)
 			}
-			classifier, err := emotion.NewClassifier(emotionModelDir, cfg.Threads)
+			classifier, err := emotion.NewClassifier(sherpaClient, emotionModelDir, cfg.Threads)
 			if err != nil {
 				return fmt.Errorf("init emotion classifier: %w", err)
 			}

@@ -35,6 +35,19 @@ jobs:
           fi
           go build -ldflags "-X main.version=${VERSION}" -o metr ./cmd/
 
+      - name: Verify main binary has no sherpa-onnx cgo dependency
+        run: |
+          # Guardrail: the sherpa-sidecar refactor requires the main metr
+          # binary to stay cgo-free. If this check fails it means someone
+          # reintroduced a direct import of sherpa-onnx-go-macos from the
+          # main package graph and end-user machines will hit
+          # "dyld: Library not loaded: @rpath/libsherpa-onnx-c-api.dylib".
+          go test ./cmd/ -run TestMainBinaryHasNoSherpaDep
+          if otool -L metr | grep -iE 'sherpa|onnx'; then
+            echo "::error::main metr binary links sherpa/onnx dylibs — sidecar invariant violated"
+            exit 1
+          fi
+
       - name: Run tests
         run: go test ./...
 
