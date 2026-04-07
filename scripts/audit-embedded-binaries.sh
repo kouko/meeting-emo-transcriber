@@ -104,12 +104,25 @@ check_binary() {
   #     /usr/lib/libfoo.dylib (compatibility version ..., current version ...)
   #     @rpath/libbar.dylib (compatibility version ..., current version ..., weak)
   #
-  # Weak deps are skipped because dyld tolerates them being missing.
-  # Match on the whole line first to filter out weak entries, then
-  # extract the dep name.
-  local unresolved
-  unresolved="$(otool -L "$bin" 2>/dev/null | tail -n +2 \
-    | grep -E '^[[:space:]]*@rpath/' \
+  # We check two failure modes here:
+  #
+  # 1. @rpath deps where the referenced dylib is not bundled in
+  #    $TARGET_DIR. dyld will try to resolve via LC_RPATH at runtime;
+  #    if no companion dylib exists in any rpath dir, the load aborts.
+  #
+  # 2. Absolute-path deps that point outside /usr/lib and /System/Library.
+  #    Anything in /opt/homebrew, /Users, /private, /tmp, etc. will only
+  #    exist on the build host. This is the class of bug where ffmpeg's
+  #    ./configure auto-detected libX11 from a Homebrew install and
+  #    baked /opt/homebrew/opt/libx11/lib/libX11.6.dylib into the
+  #    binary, causing failures on user machines without that exact
+  #    Homebrew package installed.
+  #
+  # Weak deps are skipped in both cases because dyld tolerates them
+  # being missing. Match on the whole line first to filter out weak
+  # entries, then extract the dep path.
+  local nonweak_deps
+  nonweak_deps="$(otool -L "$bin" 2>/dev/null | tail -n +2 \
     | grep -v ', weak)$' \
     | awk '{print $1}' \
     || true)"
@@ -117,13 +130,36 @@ check_binary() {
   local dep
   while IFS= read -r dep; do
     [[ -z "$dep" ]] && continue
-    local dep_name
-    dep_name="${dep#@rpath/}"
-    if ! is_shipped "$dep_name"; then
-      echo "      ERROR: unresolved @rpath dep: $dep (no $dep_name in $TARGET_DIR)"
-      FAIL=1
-    fi
-  done <<< "$unresolved"
+    case "$dep" in
+      @rpath/*)
+        local dep_name="${dep#@rpath/}"
+        if ! is_shipped "$dep_name"; then
+          echo "      ERROR: unresolved @rpath dep: $dep (no $dep_name in $TARGET_DIR)"
+          FAIL=1
+        fi
+        ;;
+      @loader_path/*|@executable_path/*)
+        # Resolution depends on the binary's location at runtime, not at
+        # audit time. Skip — these are expected for properly built dylibs
+        # that ship next to their consumers.
+        ;;
+      /usr/lib/*|/System/Library/*)
+        # macOS system libraries — always present.
+        ;;
+      /*)
+        # Any other absolute path is build-host-specific. The most
+        # common offender is /opt/homebrew/... when a build script's
+        # autoconf/cmake step picks up a Homebrew-installed library.
+        echo "      ERROR: non-system absolute dep: $dep"
+        echo "             (this path will not exist on end-user machines)"
+        FAIL=1
+        ;;
+      *)
+        # Relative paths or unknown format — flag for inspection.
+        echo "      WARNING: unrecognised dep format: $dep"
+        ;;
+    esac
+  done <<< "$nonweak_deps"
 }
 
 for f in "$TARGET_DIR"/*; do

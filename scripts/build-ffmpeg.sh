@@ -75,6 +75,19 @@ CONFIGURE_FLAGS=(
     --disable-network
     --disable-debug
     --disable-runtime-cpudetect
+    # Disable autodetection of external libraries that might exist on the
+    # build host but not on end-user machines. Without these flags ffmpeg's
+    # ./configure happily picks up Homebrew-installed libs (e.g. libX11)
+    # and bakes their absolute paths into the resulting binary, which then
+    # fails with "Library not loaded: /opt/homebrew/opt/libx11/lib/..."
+    # on user machines that don't have libx11 installed via Homebrew.
+    # We don't use any of these features (audio-only, no video display).
+    --disable-xlib
+    --disable-libxcb
+    --disable-libxcb-shm
+    --disable-libxcb-shape
+    --disable-libxcb-xfixes
+    --disable-sdl2
     # Enable what we need
     --enable-small
     # macOS: use native AudioToolbox for audio decoding
