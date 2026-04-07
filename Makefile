@@ -4,13 +4,21 @@ GOARCH ?= $(shell uname -m | sed 's/x86_64/amd64/' | sed 's/aarch64/arm64/')
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
 LDFLAGS := -X main.version=$(VERSION)
 
-.PHONY: all build clean deps build-deps download-deps build-sherpa-sidecar test info clean-all package
+.PHONY: all build clean deps build-deps download-deps build-sherpa-sidecar audit-embedded test info clean-all package
 
 # Default: build for current platform
-all: deps build
+all: deps audit-embedded build
 
 # Download/build all external dependencies
 deps: build-deps download-deps build-sherpa-sidecar
+
+# Audit every binary under embedded/bin/<platform>/ for LC_RPATH entries
+# and @rpath dependencies that would fail on end-user machines. This
+# catches both the sherpa-onnx and whisper-cli classes of dyld bugs
+# before they reach a tagged release.
+audit-embedded:
+	@echo "==> Auditing embedded binaries for dyld load problems..."
+	@bash scripts/audit-embedded-binaries.sh
 
 build-deps:
 	@echo "==> Building whisper-cli..."
