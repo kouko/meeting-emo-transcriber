@@ -22,8 +22,17 @@ fi
 
 git checkout "$WHISPER_VERSION"
 
-echo "Building with Metal GPU support..."
+echo "Building with Metal GPU support (static libs)..."
+# BUILD_SHARED_LIBS=OFF makes whisper.cpp and ggml link statically into the
+# whisper-cli binary, producing a single self-contained executable with no
+# @rpath dylib dependencies. This matters because whisper.cpp's default
+# shared-lib build bakes the CMake build tree path into the binary's
+# LC_RPATH (e.g. /Users/runner/work/.../whisper.cpp/build/src on CI),
+# causing "dyld: Library not loaded" failures on every end-user machine.
+# GGML_METAL_EMBED_LIBRARY=1 embeds the Metal shader source into the
+# binary itself, so no .metallib file needs to ship alongside.
 cmake -B build \
+    -DBUILD_SHARED_LIBS=OFF \
     -DGGML_METAL=1 \
     -DGGML_METAL_EMBED_LIBRARY=1 \
     -DCMAKE_BUILD_TYPE=Release
