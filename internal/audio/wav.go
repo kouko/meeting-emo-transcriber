@@ -81,6 +81,19 @@ func WriteWAV(path string, samples []float32, sampleRate int) error {
 	return enc.Close()
 }
 
+// RMS computes the root-mean-square of float32 audio samples.
+// Returns 0.0 for empty input.
+func RMS(samples []float32) float64 {
+	if len(samples) == 0 {
+		return 0.0
+	}
+	var sum float64
+	for _, s := range samples {
+		sum += float64(s) * float64(s)
+	}
+	return math.Sqrt(sum / float64(len(samples)))
+}
+
 // ExtractSegment returns the samples between start and end seconds.
 // Indices are clamped to valid bounds. If start >= len(samples), returns empty slice.
 func ExtractSegment(samples []float32, sampleRate int, start, end float64) []float32 {
