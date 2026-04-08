@@ -69,6 +69,8 @@ func ResolveSpeakerNames(
 	store *speaker.Store,
 	diarizeBinPath string,
 	learn bool,
+	minSampleDuration float64,
+	minSampleRMS float64,
 ) ([]string, error) {
 	// Log enrolled profiles
 	if len(profiles) > 0 {
@@ -137,19 +139,26 @@ func ResolveSpeakerNames(
 				// Learning mode: also create speaker_N_match_Name/ folder for review
 				learnName := fmt.Sprintf("speaker_%d_match_%s", nextUnknownID, result.Name)
 				nextUnknownID++
-				persistUnknownSpeaker(store, learnName, clusterID, diarResult, wavSamples, sampleRate)
+				persistUnknownSpeaker(store, learnName, clusterID, diarResult, wavSamples, sampleRate, minSampleRMS)
 				fmt.Fprintf(os.Stderr, "    → [learn] created %s/ for review\n", learnName)
 			}
 		} else {
-			name := fmt.Sprintf("speaker_%d", nextUnknownID)
-			nextUnknownID++
-			clusterNames[clusterID] = name
-			newCount++
-			persistUnknownSpeaker(store, name, clusterID, diarResult, wavSamples, sampleRate)
-			if result.BestSim > 0 {
-				fmt.Fprintf(os.Stderr, "    → no match (best=%.2f < threshold=%.2f), created %s\n", result.BestSim, threshold, name)
+			// Check if the cluster's longest segment meets the minimum duration
+			maxDur := maxSegmentDuration(diarResult.Segments, clusterID)
+			if maxDur < minSampleDuration {
+				clusterNames[clusterID] = "Unknown"
+				fmt.Fprintf(os.Stderr, "    → longest segment %.1fs < min %.1fs, marked as Unknown\n", maxDur, minSampleDuration)
 			} else {
-				fmt.Fprintf(os.Stderr, "    → no enrolled profiles to match, created %s\n", name)
+				name := fmt.Sprintf("speaker_%d", nextUnknownID)
+				nextUnknownID++
+				clusterNames[clusterID] = name
+				newCount++
+				persistUnknownSpeaker(store, name, clusterID, diarResult, wavSamples, sampleRate, minSampleRMS)
+				if result.BestSim > 0 {
+					fmt.Fprintf(os.Stderr, "    → no match (best=%.2f < threshold=%.2f), created %s\n", result.BestSim, threshold, name)
+				} else {
+					fmt.Fprintf(os.Stderr, "    → no enrolled profiles to match, created %s\n", name)
+				}
 			}
 		}
 	}
@@ -237,7 +246,21 @@ func float64sToFloat32s(in64 []float64) []float32 {
 	return out
 }
 
-func persistUnknownSpeaker(store *speaker.Store, name, clusterID string, diarResult *DiarizeResult, wavSamples []float32, sampleRate int) {
+// maxSegmentDuration returns the longest segment duration for a given cluster.
+func maxSegmentDuration(segments []Segment, clusterID string) float64 {
+	var maxDur float64
+	for _, seg := range segments {
+		if seg.Speaker == clusterID {
+			dur := seg.End - seg.Start
+			if dur > maxDur {
+				maxDur = dur
+			}
+		}
+	}
+	return maxDur
+}
+
+func persistUnknownSpeaker(store *speaker.Store, name, clusterID string, diarResult *DiarizeResult, wavSamples []float32, sampleRate int, minRMS float64) {
 	speakerDir := filepath.Join(store.Root(), name)
 	os.MkdirAll(speakerDir, 0755)
 
@@ -260,17 +283,22 @@ func persistUnknownSpeaker(store *speaker.Store, name, clusterID string, diarRes
 
 	var audioHashes []string
 	maxSamples := 3
-	if len(segs) < maxSamples {
-		maxSamples = len(segs)
-	}
-	for i := 0; i < maxSamples; i++ {
+	saved := 0
+	for i := 0; i < len(segs) && saved < maxSamples; i++ {
 		segAudio := audio.ExtractSegment(wavSamples, sampleRate, segs[i].seg.Start, segs[i].seg.End)
-		wavName := fmt.Sprintf("%s-%s-%d.wav", datePrefix, uuid, i+1)
+		if audio.RMS(segAudio) < minRMS {
+			continue
+		}
+		wavName := fmt.Sprintf("%s-%s-%d.wav", datePrefix, uuid, saved+1)
 		wavPath := filepath.Join(speakerDir, wavName)
 		audio.WriteWAV(wavPath, segAudio, sampleRate)
 
 		hash, _ := speaker.FileHash(wavPath)
 		audioHashes = append(audioHashes, hash)
+		saved++
+	}
+	if saved == 0 {
+		fmt.Fprintf(os.Stderr, "    warning: no segments with sufficient audio energy for %s\n", name)
 	}
 
 	// Build profile with centroid voiceprint

@@ -23,6 +23,12 @@ func TestDefaults(t *testing.T) {
 	if !cfg.Discover {
 		t.Error("Discover should default to true")
 	}
+	if cfg.MinSampleDuration != 15.0 {
+		t.Errorf("MinSampleDuration = %f, want 15.0", cfg.MinSampleDuration)
+	}
+	if cfg.MinSampleRMS != 0.01 {
+		t.Errorf("MinSampleRMS = %f, want 0.01", cfg.MinSampleRMS)
+	}
 }
 
 func TestLoad_FromSpeakersDir(t *testing.T) {
@@ -45,6 +51,41 @@ func TestLoad_FromSpeakersDir(t *testing.T) {
 	}
 	if !cfg.Discover {
 		t.Error("Discover should default to true when not in config")
+	}
+}
+
+func TestLoad_MinSampleFields(t *testing.T) {
+	dir := t.TempDir()
+	yaml := "min_sample_duration: 20.0\nmin_sample_rms: 0.05\n"
+	os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(yaml), 0644)
+
+	cfg, err := Load("", dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.MinSampleDuration != 20.0 {
+		t.Errorf("MinSampleDuration = %f, want 20.0", cfg.MinSampleDuration)
+	}
+	if cfg.MinSampleRMS != 0.05 {
+		t.Errorf("MinSampleRMS = %f, want 0.05", cfg.MinSampleRMS)
+	}
+}
+
+func TestLoad_MinSampleFieldsDefault(t *testing.T) {
+	dir := t.TempDir()
+	// config.yaml without min_sample fields — should use defaults
+	yaml := "language: \"en\"\n"
+	os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(yaml), 0644)
+
+	cfg, err := Load("", dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.MinSampleDuration != 15.0 {
+		t.Errorf("MinSampleDuration = %f, want 15.0 (default)", cfg.MinSampleDuration)
+	}
+	if cfg.MinSampleRMS != 0.01 {
+		t.Errorf("MinSampleRMS = %f, want 0.01 (default)", cfg.MinSampleRMS)
 	}
 }
 

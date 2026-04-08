@@ -301,6 +301,63 @@ func TestExtractSegment(t *testing.T) {
 	}
 }
 
+func TestRMS(t *testing.T) {
+	tests := []struct {
+		name    string
+		samples []float32
+		want    float64
+		tol     float64
+	}{
+		{
+			name:    "empty",
+			samples: []float32{},
+			want:    0.0,
+			tol:     0,
+		},
+		{
+			name:    "silence",
+			samples: make([]float32, 1000),
+			want:    0.0,
+			tol:     0,
+		},
+		{
+			name: "sine wave unit amplitude",
+			samples: func() []float32 {
+				// 1 second of 440Hz sine at 16kHz — RMS should be 1/sqrt(2) ≈ 0.7071
+				s := make([]float32, 16000)
+				for i := range s {
+					s[i] = float32(math.Sin(2 * math.Pi * 440 * float64(i) / 16000))
+				}
+				return s
+			}(),
+			want: 1.0 / math.Sqrt(2),
+			tol:  0.001,
+		},
+		{
+			name: "low level below threshold",
+			samples: func() []float32 {
+				s := make([]float32, 16000)
+				for i := range s {
+					s[i] = 0.005 * float32(math.Sin(2*math.Pi*440*float64(i)/16000))
+				}
+				return s
+			}(),
+			want: 0.005 / math.Sqrt(2),
+			tol:  0.0001,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := RMS(tt.samples)
+			diff := math.Abs(got - tt.want)
+			if diff > tt.tol {
+				t.Errorf("RMS() = %f, want %f (diff %f > tol %f)", got, tt.want, diff, tt.tol)
+			}
+		})
+	}
+}
+
 func TestExtractSegmentBounds(t *testing.T) {
 	sampleRate := 16000
 	samples := make([]float32, 16000) // 1 second

@@ -28,7 +28,9 @@ type Config struct {
 	LogLevel       string
 	Threads        int
 	Models         Models
-	Vocabulary     []string // custom vocabulary for whisper prompt
+	Vocabulary        []string // custom vocabulary for whisper prompt
+	MinSampleDuration float64  // minimum segment duration (seconds) for auto-discovered speaker samples
+	MinSampleRMS      float64  // minimum RMS energy for speaker samples (0.0-1.0)
 }
 
 // defaultModelsDir returns ~/.metr/models/
@@ -49,7 +51,9 @@ func Defaults() Config {
 		MatchThreshold: 0.55,
 		Format:         "txt",
 		Strategy:  "max_similarity",
-		Discover:  true,
+		Discover:          true,
+		MinSampleDuration: 15.0,
+		MinSampleRMS:      0.01,
 		LogLevel:  "info",
 		Threads:   runtime.NumCPU(),
 		Models: Models{
@@ -79,6 +83,8 @@ func Load(configPath, speakersDir string) (Config, error) {
 	v.SetDefault("discover", d.Discover)
 	v.SetDefault("loglevel", d.LogLevel)
 	v.SetDefault("threads", d.Threads)
+	v.SetDefault("min_sample_duration", d.MinSampleDuration)
+	v.SetDefault("min_sample_rms", d.MinSampleRMS)
 	v.SetDefault("models.whisper", d.Models.Whisper)
 	v.SetDefault("models.speaker", d.Models.Speaker)
 	v.SetDefault("models.emotion", d.Models.Emotion)
@@ -108,7 +114,9 @@ func Load(configPath, speakersDir string) (Config, error) {
 		Discover:   v.GetBool("discover"),
 		LogLevel:   v.GetString("loglevel"),
 		Threads:    v.GetInt("threads"),
-		Vocabulary: v.GetStringSlice("vocabulary"),
+		Vocabulary:        v.GetStringSlice("vocabulary"),
+		MinSampleDuration: v.GetFloat64("min_sample_duration"),
+		MinSampleRMS:      v.GetFloat64("min_sample_rms"),
 		Models: Models{
 			Whisper: v.GetString("models.whisper"),
 			Speaker: v.GetString("models.speaker"),
@@ -124,7 +132,9 @@ type SaveableConfig struct {
 	Threshold      float64  `yaml:"threshold"`
 	MatchThreshold float64  `yaml:"match_threshold"`
 	Format         string   `yaml:"format"`
-	Vocabulary     []string `yaml:"vocabulary,omitempty"`
+	Vocabulary        []string `yaml:"vocabulary,omitempty"`
+	MinSampleDuration float64  `yaml:"min_sample_duration"`
+	MinSampleRMS      float64  `yaml:"min_sample_rms"`
 }
 
 // Save writes user-facing config values to a YAML file.
@@ -181,6 +191,16 @@ func writeConfigTemplate(configPath string, sc SaveableConfig) error {
 	lines = append(lines, "# Improves recognition of proper nouns, technical terms, etc.")
 	lines = append(lines, "# Each entry is passed to whisper's --prompt as comma-separated hints.")
 	lines = append(lines, "# CLI --prompt values are merged with this list (no duplicates).")
+	lines = append(lines, "")
+	lines = append(lines, "# Minimum segment duration for auto-discovered speaker samples (default: 15.0)")
+	lines = append(lines, "# Speakers whose longest segment is shorter than this are marked Unknown.")
+	lines = append(lines, "# Higher values require longer continuous speech for reliable voiceprint enrollment.")
+	lines = append(lines, fmt.Sprintf("min_sample_duration: %.1f", sc.MinSampleDuration))
+	lines = append(lines, "")
+	lines = append(lines, "# Minimum RMS energy for speaker samples (default: 0.01)")
+	lines = append(lines, "# Segments below this energy level are considered silence/noise and skipped.")
+	lines = append(lines, "# Range: 0.0 - 1.0 (on normalized [-1,1] audio)")
+	lines = append(lines, fmt.Sprintf("min_sample_rms: %.2f", sc.MinSampleRMS))
 	if len(sc.Vocabulary) > 0 {
 		lines = append(lines, "vocabulary:")
 		for _, v := range sc.Vocabulary {
@@ -204,6 +224,8 @@ func writeConfigCompact(configPath string, sc SaveableConfig) error {
 	lines = append(lines, fmt.Sprintf("threshold: %.2f", sc.Threshold))
 	lines = append(lines, fmt.Sprintf("match_threshold: %.2f", sc.MatchThreshold))
 	lines = append(lines, fmt.Sprintf("format: %q", sc.Format))
+	lines = append(lines, fmt.Sprintf("min_sample_duration: %.1f", sc.MinSampleDuration))
+	lines = append(lines, fmt.Sprintf("min_sample_rms: %.2f", sc.MinSampleRMS))
 	if len(sc.Vocabulary) > 0 {
 		lines = append(lines, "vocabulary:")
 		for _, v := range sc.Vocabulary {

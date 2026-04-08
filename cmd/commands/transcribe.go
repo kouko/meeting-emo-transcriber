@@ -35,8 +35,10 @@ func newTranscribeCmd() *cobra.Command {
 		learn          bool
 		enhance        bool
 		normalize      bool
-		noCache        bool
-		prompt         string
+		noCache           bool
+		prompt            string
+		minSampleDuration float64
+		minSampleRMS      float64
 	)
 	cmd := &cobra.Command{
 		Use:   "transcribe --input <audio file>",
@@ -73,11 +75,19 @@ Examples:
 			if cmd.Flags().Changed("format") {
 				cfg.Format = format
 			}
+			if cmd.Flags().Changed("min-sample-duration") {
+				cfg.MinSampleDuration = minSampleDuration
+			}
+			if cmd.Flags().Changed("min-sample-rms") {
+				cfg.MinSampleRMS = minSampleRMS
+			}
 			// Sync back to local vars so downstream code uses merged values
 			language = cfg.Language
 			threshold = float32(cfg.Threshold)
 			matchThreshold = float32(cfg.MatchThreshold)
 			format = cfg.Format
+			minSampleDuration = cfg.MinSampleDuration
+			minSampleRMS = cfg.MinSampleRMS
 
 			// 3. Extract embedded binaries
 			fmt.Fprintf(os.Stderr, "[1/9] Extracting embedded binaries...\n")
@@ -234,6 +244,7 @@ Examples:
 			speakerNames, err := diarize.ResolveSpeakerNames(
 				speakerIDs, diarResult, wavSamples, wavSampleRate,
 				profiles, matchThreshold, store, bins.Diarize, learn,
+				minSampleDuration, minSampleRMS,
 			)
 			if err != nil {
 				return fmt.Errorf("resolve speaker names: %w", err)
@@ -358,11 +369,13 @@ Examples:
 				}
 			}
 			sc := config.SaveableConfig{
-				Language:       language,
-				Threshold:      float64(threshold),
-				MatchThreshold: float64(matchThreshold),
-				Format:         format,
-				Vocabulary:     vocabToSave,
+				Language:          language,
+				Threshold:         float64(threshold),
+				MatchThreshold:    float64(matchThreshold),
+				Format:            format,
+				Vocabulary:        vocabToSave,
+				MinSampleDuration: minSampleDuration,
+				MinSampleRMS:      minSampleRMS,
 			}
 			if err := config.Save(configSavePath, sc); err != nil {
 				fmt.Fprintf(os.Stderr, "Warning: could not save config: %v\n", err)
@@ -385,6 +398,8 @@ Examples:
 	cmd.Flags().BoolVar(&normalize, "normalize", false, "apply loudnorm normalization (auto-attenuates >0dB clipping regardless)")
 	cmd.Flags().BoolVar(&noCache, "no-cache", false, "skip ASR cache and force re-transcription")
 	cmd.Flags().StringVar(&prompt, "prompt", "", "custom vocabulary/context hints for ASR (comma-separated)")
+	cmd.Flags().Float64Var(&minSampleDuration, "min-sample-duration", 15.0, "minimum segment duration (seconds) for auto-discovered speaker samples")
+	cmd.Flags().Float64Var(&minSampleRMS, "min-sample-rms", 0.01, "minimum RMS energy for speaker samples (0.0-1.0)")
 	cmd.MarkFlagRequired("input")
 	return cmd
 }

@@ -13,9 +13,10 @@ import (
 
 // Segment represents a speaker diarization result.
 type Segment struct {
-	Start   float64 `json:"start"`
-	End     float64 `json:"end"`
-	Speaker string  `json:"speaker"`
+	Start        float64 `json:"start"`
+	End          float64 `json:"end"`
+	Speaker      string  `json:"speaker"`
+	QualityScore float64 `json:"quality_score,omitempty"`
 }
 
 // DiarizeResult contains diarization segments and per-speaker voiceprints.

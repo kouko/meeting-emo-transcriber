@@ -64,6 +64,7 @@ struct MetrDiarize {
                     "start": Double(seg.startTimeSeconds),
                     "end": Double(seg.endTimeSeconds),
                     "speaker": seg.speakerId,
+                    "quality_score": Double(seg.qualityScore),
                 ]
             }
 
