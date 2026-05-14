@@ -15,6 +15,14 @@ import (
 // VoiceprintExtractFunc extracts a single voiceprint from a WAV file.
 type VoiceprintExtractFunc func(wavPath string) ([]float32, error)
 
+// EnrollMinDurationSec is the minimum total clean-speech duration (across all
+// enrolled files for one speaker) required for AutoEnroll to actually compute
+// and persist a voiceprint. Industry guidance (Azure: 20s verify / 30s
+// identify; NIST SRE: 10-60s) puts the practical floor for reliable
+// enrollment around 15 seconds; below that, the embedding becomes too
+// session-specific to be useful.
+const EnrollMinDurationSec = 15.0
+
 // Package-level seams for tests to override audio operations without ffmpeg.
 var (
 	convertToWAVFn = audio.ConvertToWAV
@@ -117,18 +125,51 @@ func AutoEnroll(store *Store, ffmpegPath string, extractFn VoiceprintExtractFunc
 			return updated, fmt.Errorf("create temp dir: %w", err)
 		}
 
-		embeddings := make([][]float32, 0, len(allAudioFiles))
-		var skipped int
+		// Pass 1: convert each source file to wav and measure duration.
+		// Skip enrollment early if the total clean speech is too short to
+		// produce a reliable voiceprint.
+		type convertedWAV struct {
+			path     string
+			duration float64
+		}
+		converted := make([]convertedWAV, 0, len(allAudioFiles))
+		var totalDuration float64
 		for i, file := range allAudioFiles {
 			tempWav := filepath.Join(tmpDir, fmt.Sprintf("enroll_%d.wav", i))
 			if err := convertToWAVFn(ffmpegPath, file, tempWav); err != nil {
 				os.RemoveAll(tmpDir)
 				return updated, fmt.Errorf("convert %s: %w", file, err)
 			}
-			emb, err := extractFn(tempWav)
+			samples, rate, err := audio.ReadWAV(tempWav)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "  warning: cannot measure duration of %s: %v\n",
+					filepath.Base(file), err)
+				continue
+			}
+			if rate == 0 {
+				continue
+			}
+			dur := float64(len(samples)) / float64(rate)
+			converted = append(converted, convertedWAV{tempWav, dur})
+			totalDuration += dur
+		}
+
+		if totalDuration < EnrollMinDurationSec {
+			os.RemoveAll(tmpDir)
+			fmt.Fprintf(os.Stderr,
+				"  warning: %s has only %.1fs of audio (need >= %.1fs), skipping enrollment — add more samples\n",
+				name, totalDuration, EnrollMinDurationSec)
+			continue
+		}
+
+		// Pass 2: extract embeddings from each converted wav.
+		embeddings := make([][]float32, 0, len(converted))
+		var skipped int
+		for _, w := range converted {
+			emb, err := extractFn(w.path)
 			if err != nil {
 				os.RemoveAll(tmpDir)
-				return updated, fmt.Errorf("extract voiceprint for %s: %w", file, err)
+				return updated, fmt.Errorf("extract voiceprint for %s: %w", w.path, err)
 			}
 			if len(emb) == 0 {
 				skipped++
@@ -144,7 +185,7 @@ func AutoEnroll(store *Store, ffmpegPath string, extractFn VoiceprintExtractFunc
 		}
 		if skipped > 0 {
 			fmt.Fprintf(os.Stderr, "  warning: %d/%d files produced empty embeddings for %s\n",
-				skipped, len(allAudioFiles), name)
+				skipped, len(converted), name)
 		}
 
 		emb := averageEmbeddings(embeddings)

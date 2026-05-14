@@ -88,6 +88,21 @@ func writeBytes(t *testing.T, path string, data []byte) {
 	}
 }
 
+// writeTestWAV writes a sine-wave WAV file of the requested duration so
+// AutoEnroll's duration-gating logic can measure it correctly.
+func writeTestWAV(t *testing.T, path string, durationSec float64) {
+	t.Helper()
+	const sampleRate = 16000
+	n := int(float64(sampleRate) * durationSec)
+	samples := make([]float32, n)
+	for i := range samples {
+		samples[i] = float32(math.Sin(2 * math.Pi * 440 * float64(i) / float64(sampleRate)))
+	}
+	if err := audio.WriteWAV(path, samples, sampleRate); err != nil {
+		t.Fatalf("write wav %s: %v", path, err)
+	}
+}
+
 func loadProfileFile(t *testing.T, path string) types.SpeakerProfile {
 	t.Helper()
 	data, err := os.ReadFile(path)
@@ -128,9 +143,10 @@ func TestAutoEnroll_NewSpeakerMultipleFiles_ExtractsPerFileAndAverages(t *testin
 	if err := os.MkdirAll(speakerDir, 0755); err != nil {
 		t.Fatal(err)
 	}
-	writeBytes(t, filepath.Join(speakerDir, "a.wav"), []byte("audio-a"))
-	writeBytes(t, filepath.Join(speakerDir, "b.wav"), []byte("audio-b"))
-	writeBytes(t, filepath.Join(speakerDir, "c.wav"), []byte("audio-c"))
+	// Three 6-second wavs → 18s total, above the 15s enrollment minimum.
+	writeTestWAV(t, filepath.Join(speakerDir, "a.wav"), 6.0)
+	writeTestWAV(t, filepath.Join(speakerDir, "b.wav"), 6.0)
+	writeTestWAV(t, filepath.Join(speakerDir, "c.wav"), 6.0)
 
 	store := NewStore(dir, supportedExtensions())
 	fake := withFakeAudio(t)
@@ -192,6 +208,68 @@ func TestAutoEnroll_NewSpeakerMultipleFiles_ExtractsPerFileAndAverages(t *testin
 	}
 }
 
+// Enrollment quality gate: when total audio duration is below the
+// EnrollMinDurationSec floor, AutoEnroll warns and skips persisting the
+// voiceprint. A short, noisy enrollment would yield an unreliable embedding
+// that pollutes downstream matching, so refusing it is safer than warning
+// only.
+func TestAutoEnroll_TooShortAudio_SkipsEnrollment(t *testing.T) {
+	dir := t.TempDir()
+	speakerDir := filepath.Join(dir, "Alice")
+	if err := os.MkdirAll(speakerDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	// Single 5-second wav — well below the 15-second floor.
+	writeTestWAV(t, filepath.Join(speakerDir, "a.wav"), 5.0)
+
+	store := NewStore(dir, supportedExtensions())
+	withFakeAudio(t)
+	ex := &recordingExtractor{embedding: []float32{1, 0, 0}}
+
+	n, err := AutoEnroll(store, "fake-ffmpeg", ex.extract)
+	if err != nil {
+		t.Fatalf("AutoEnroll: %v", err)
+	}
+	if n != 0 {
+		t.Errorf("enrolled = %d, want 0 (short audio should be skipped)", n)
+	}
+	// Extractor must not be called because we bail before pass 2.
+	if len(ex.wavPaths) != 0 {
+		t.Errorf("extractor called %d times, want 0 (gate should skip extraction)", len(ex.wavPaths))
+	}
+	// No profile.json should be written.
+	if path := store.GetSingleProfilePath("Alice"); path != "" {
+		t.Errorf("profile written at %s, expected none", path)
+	}
+}
+
+// Long-enough audio assembled from multiple short files should pass the gate.
+func TestAutoEnroll_MultipleShortFilesAddingUp_PassesGate(t *testing.T) {
+	dir := t.TempDir()
+	speakerDir := filepath.Join(dir, "Alice")
+	if err := os.MkdirAll(speakerDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	// Two 8-second files = 16s total, above the 15s floor.
+	writeTestWAV(t, filepath.Join(speakerDir, "a.wav"), 8.0)
+	writeTestWAV(t, filepath.Join(speakerDir, "b.wav"), 8.0)
+
+	store := NewStore(dir, supportedExtensions())
+	withFakeAudio(t)
+	ex := &recordingExtractor{embedding: []float32{1, 0, 0}}
+
+	n, err := AutoEnroll(store, "fake-ffmpeg", ex.extract)
+	if err != nil {
+		t.Fatalf("AutoEnroll: %v", err)
+	}
+	if n != 1 {
+		t.Errorf("enrolled = %d, want 1 (16s should pass the gate)", n)
+	}
+	if len(ex.wavPaths) != 2 {
+		t.Errorf("extractor called %d times, want 2 (one per file)", len(ex.wavPaths))
+	}
+}
+
 func TestAutoEnroll_NoNewFiles_SkipsExtraction(t *testing.T) {
 	dir := t.TempDir()
 	speakerDir := filepath.Join(dir, "Alice")
@@ -199,7 +277,7 @@ func TestAutoEnroll_NoNewFiles_SkipsExtraction(t *testing.T) {
 		t.Fatal(err)
 	}
 	wavPath := filepath.Join(speakerDir, "a.wav")
-	writeBytes(t, wavPath, []byte("audio-a"))
+	writeTestWAV(t, wavPath, 20.0)
 
 	hash, err := FileHash(wavPath)
 	if err != nil {
@@ -237,7 +315,7 @@ func TestAutoEnroll_ForceFlag_ReExtractsEvenWithoutNewFiles(t *testing.T) {
 		t.Fatal(err)
 	}
 	wavPath := filepath.Join(speakerDir, "a.wav")
-	writeBytes(t, wavPath, []byte("audio-a"))
+	writeTestWAV(t, wavPath, 20.0)
 
 	hash, _ := FileHash(wavPath)
 	existing := types.SpeakerProfile{
@@ -342,7 +420,7 @@ func TestAutoEnroll_PreservesCentroidVoiceprint(t *testing.T) {
 	if err := os.MkdirAll(speakerDir, 0755); err != nil {
 		t.Fatal(err)
 	}
-	writeBytes(t, filepath.Join(speakerDir, "a.wav"), []byte("audio-a"))
+	writeTestWAV(t, filepath.Join(speakerDir, "a.wav"), 20.0)
 
 	existing := types.SpeakerProfile{
 		KnownAudioHashes: nil, // forces AutoEnroll to find the wav as "new"
@@ -398,7 +476,7 @@ func TestAutoEnroll_MergesMultipleProfileJSONs(t *testing.T) {
 	if err := os.MkdirAll(speakerDir, 0755); err != nil {
 		t.Fatal(err)
 	}
-	writeBytes(t, filepath.Join(speakerDir, "a.wav"), []byte("audio-a"))
+	writeTestWAV(t, filepath.Join(speakerDir, "a.wav"), 20.0)
 
 	p1 := types.SpeakerProfile{
 		KnownAudioHashes: []string{"sha256:dead"},
