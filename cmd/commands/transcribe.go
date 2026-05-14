@@ -40,6 +40,9 @@ func newTranscribeCmd() *cobra.Command {
 		prompt            string
 		minSampleDuration float64
 		minSampleRMS      float64
+		verifySegments            bool
+		verifySegmentsThreshold   float32
+		verifySegmentsMinDuration float64
 	)
 	cmd := &cobra.Command{
 		Use:   "transcribe --input <audio file>",
@@ -85,6 +88,15 @@ Examples:
 			if cmd.Flags().Changed("min-sample-rms") {
 				cfg.MinSampleRMS = minSampleRMS
 			}
+			if cmd.Flags().Changed("verify-segments") {
+				cfg.VerifySegments = verifySegments
+			}
+			if cmd.Flags().Changed("verify-threshold") {
+				cfg.VerifySegmentsThreshold = float64(verifySegmentsThreshold)
+			}
+			if cmd.Flags().Changed("verify-min-duration") {
+				cfg.VerifySegmentsMinDuration = verifySegmentsMinDuration
+			}
 			// Sync back to local vars so downstream code uses merged values
 			language = cfg.Language
 			threshold = float32(cfg.Threshold)
@@ -93,6 +105,9 @@ Examples:
 			format = cfg.Format
 			minSampleDuration = cfg.MinSampleDuration
 			minSampleRMS = cfg.MinSampleRMS
+			verifySegments = cfg.VerifySegments
+			verifySegmentsThreshold = float32(cfg.VerifySegmentsThreshold)
+			verifySegmentsMinDuration = cfg.VerifySegmentsMinDuration
 
 			// 3. Extract embedded binaries
 			fmt.Fprintf(os.Stderr, "[1/9] Extracting embedded binaries...\n")
@@ -256,6 +271,47 @@ Examples:
 				return fmt.Errorf("resolve speaker names: %w", err)
 			}
 
+			// 12b. Optional per-segment re-verification: re-check each ASR
+			// segment's embedding against its matched profile and demote
+			// any segment whose cosine falls below the (looser) verify
+			// threshold. Catches stray foreign speech merged into a cluster.
+			if verifySegments && len(profiles) > 0 {
+				fmt.Fprintf(os.Stderr,
+					"  --verify-segments enabled (threshold=%.2f, min-duration=%.1fs)\n",
+					verifySegmentsThreshold, verifySegmentsMinDuration)
+				asrResults := make([]types.ASRResult, len(results))
+				copy(asrResults, results)
+				batchExtract := func(wavPaths []string) ([][]float32, error) {
+					vp, err := diarize.ExtractVoiceprints(bins.Diarize, wavPaths)
+					if err != nil {
+						return nil, err
+					}
+					out := make([][]float32, len(vp))
+					for i, v := range vp {
+						emb := make([]float32, len(v.Vector))
+						for j, x := range v.Vector {
+							emb[j] = float32(x)
+						}
+						out[i] = emb
+					}
+					return out, nil
+				}
+				verifyTmpDir, err := os.MkdirTemp("", "met-verify-*")
+				if err != nil {
+					return fmt.Errorf("create verify temp dir: %w", err)
+				}
+				refined, verifyErr := diarize.RefineSpeakerNamesPerSegment(
+					speakerNames, asrResults, profiles, wavSamples, wavSampleRate,
+					batchExtract, verifySegmentsThreshold, verifySegmentsMinDuration, verifyTmpDir,
+				)
+				os.RemoveAll(verifyTmpDir)
+				if verifyErr != nil {
+					fmt.Fprintf(os.Stderr, "  warning: per-segment verify failed (%v), keeping cluster labels\n", verifyErr)
+				} else {
+					speakerNames = refined
+				}
+			}
+
 			// 13. Emotion classification + build segments
 			fmt.Fprintf(os.Stderr, "[8/9] Running emotion classification...\n")
 			emotionModelDir, err := models.EnsureModel("sensevoice-small-int8")
@@ -400,6 +456,9 @@ Examples:
 	cmd.Flags().Float32Var(&threshold, "threshold", 0.8, "diarization clustering threshold (higher = more speakers)")
 	cmd.Flags().Float32Var(&matchThreshold, "match-threshold", 0.65, "speaker matching threshold for enrolled profiles")
 	cmd.Flags().Float32Var(&matchMargin, "match-margin", 0.07, "minimum cosine gap between best and runner-up profile to accept a match")
+	cmd.Flags().BoolVar(&verifySegments, "verify-segments", false, "re-verify each ASR segment against its matched profile and demote stray segments to Unknown")
+	cmd.Flags().Float32Var(&verifySegmentsThreshold, "verify-threshold", 0.50, "per-segment verification threshold (looser than --match-threshold)")
+	cmd.Flags().Float64Var(&verifySegmentsMinDuration, "verify-min-duration", 1.0, "minimum segment duration (seconds) to re-verify")
 	cmd.Flags().IntVar(&numSpeakers, "num-speakers", 0, "expected number of speakers (0 = auto-detect)")
 	cmd.Flags().BoolVarP(&learn, "learning-mode", "L", false, "create folders for all clusters (including matched) for manual review")
 	cmd.Flags().BoolVar(&enhance, "enhance", false, "enhance audio with DeepFilterNet3 noise reduction before processing")

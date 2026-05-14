@@ -117,6 +117,9 @@ metr meeting.mp3 --no-cache                 # Force re-transcription (skip cache
 | `--threshold` | | `0.80` | Diarization clustering threshold (higher = more speakers) |
 | `--match-threshold` | | `0.65` | Speaker matching cosine similarity threshold |
 | `--match-margin` | | `0.07` | Min cosine gap between best & runner-up profile to accept a match |
+| `--verify-segments` | | `false` | Re-verify each ASR segment against its matched profile; demote stray segments to Unknown |
+| `--verify-threshold` | | `0.50` | Per-segment verification threshold (looser than `--match-threshold`) |
+| `--verify-min-duration` | | `1.0` | Minimum segment duration (seconds) eligible for re-verification |
 | `--num-speakers` | | `0` | Expected number of speakers (0 = auto-detect) |
 | `--learning-mode` | `-L` | `false` | Create folders for all detected speakers for review |
 | `--enhance` | | `false` | DeepFilterNet3 noise reduction before processing |

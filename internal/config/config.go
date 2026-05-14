@@ -32,6 +32,15 @@ type Config struct {
 	Vocabulary        []string // custom vocabulary for whisper prompt
 	MinSampleDuration float64  // minimum segment duration (seconds) for auto-discovered speaker samples
 	MinSampleRMS      float64  // minimum RMS energy for speaker samples (0.0-1.0)
+
+	// Per-segment re-verification: after cluster-level assignment, re-check
+	// each ASR segment's embedding against the matched profile and demote
+	// individual segments whose cosine falls below VerifySegmentsThreshold.
+	// Adds one extra batch embedding pass per recording (cheap because
+	// metr-diarize batches the calls).
+	VerifySegments              bool
+	VerifySegmentsThreshold     float64
+	VerifySegmentsMinDuration   float64
 }
 
 // defaultModelsDir returns ~/.metr/models/
@@ -56,6 +65,9 @@ func Defaults() Config {
 		Discover:          true,
 		MinSampleDuration: 15.0,
 		MinSampleRMS:      0.01,
+		VerifySegments:            false, // opt-in until validated on real recordings
+		VerifySegmentsThreshold:   0.50,
+		VerifySegmentsMinDuration: 1.0,
 		LogLevel:  "info",
 		Threads:   runtime.NumCPU(),
 		Models: Models{
@@ -88,6 +100,9 @@ func Load(configPath, speakersDir string) (Config, error) {
 	v.SetDefault("threads", d.Threads)
 	v.SetDefault("min_sample_duration", d.MinSampleDuration)
 	v.SetDefault("min_sample_rms", d.MinSampleRMS)
+	v.SetDefault("verify_segments", d.VerifySegments)
+	v.SetDefault("verify_segments_threshold", d.VerifySegmentsThreshold)
+	v.SetDefault("verify_segments_min_duration", d.VerifySegmentsMinDuration)
 	v.SetDefault("models.whisper", d.Models.Whisper)
 	v.SetDefault("models.speaker", d.Models.Speaker)
 	v.SetDefault("models.emotion", d.Models.Emotion)
@@ -121,6 +136,9 @@ func Load(configPath, speakersDir string) (Config, error) {
 		Vocabulary:        v.GetStringSlice("vocabulary"),
 		MinSampleDuration: v.GetFloat64("min_sample_duration"),
 		MinSampleRMS:      v.GetFloat64("min_sample_rms"),
+		VerifySegments:            v.GetBool("verify_segments"),
+		VerifySegmentsThreshold:   v.GetFloat64("verify_segments_threshold"),
+		VerifySegmentsMinDuration: v.GetFloat64("verify_segments_min_duration"),
 		Models: Models{
 			Whisper: v.GetString("models.whisper"),
 			Speaker: v.GetString("models.speaker"),
