@@ -23,7 +23,7 @@ func newInitCmd() *cobra.Command {
 			}
 			cfgPath := filepath.Join(metrDir, "config.yaml")
 			if _, err := os.Stat(cfgPath); os.IsNotExist(err) {
-				template := "# metr config.yaml\n# Uncomment and modify values as needed.\n\n# language: \"auto\"        # auto | zh-TW | zh | en | ja\n# threshold: 0.8          # Diarization clustering threshold (higher = more speakers)\n# match_threshold: 0.55   # Speaker matching threshold for enrolled profiles\n# format: txt             # txt | json | srt | all\n\n# Custom vocabulary for better ASR accuracy (names, terms, jargon)\n# vocabulary:\n#   - \"kouko\"\n#   - \"YanJen\"\n"
+				template := "# metr config.yaml\n# Uncomment and modify values as needed.\n\n# language: \"auto\"        # auto | zh-TW | zh | en | ja\n# threshold: 0.8          # Diarization clustering threshold (higher = more speakers)\n# match_threshold: 0.65   # Speaker matching threshold for enrolled profiles\n# match_margin: 0.07      # Min cosine gap between best and runner-up profile to accept a match\n# format: txt             # txt | json | srt | all\n\n# Custom vocabulary for better ASR accuracy (names, terms, jargon)\n# vocabulary:\n#   - \"kouko\"\n#   - \"YanJen\"\n"
 				if err := os.WriteFile(cfgPath, []byte(template), 0644); err != nil {
 					return fmt.Errorf("writing config template: %w", err)
 				}

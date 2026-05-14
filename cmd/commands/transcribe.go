@@ -31,6 +31,7 @@ func newTranscribeCmd() *cobra.Command {
 		language       string
 		threshold      float32
 		matchThreshold float32
+		matchMargin    float32
 		numSpeakers    int
 		learn          bool
 		enhance        bool
@@ -72,6 +73,9 @@ Examples:
 			if cmd.Flags().Changed("match-threshold") {
 				cfg.MatchThreshold = float64(matchThreshold)
 			}
+			if cmd.Flags().Changed("match-margin") {
+				cfg.MatchMargin = float64(matchMargin)
+			}
 			if cmd.Flags().Changed("format") {
 				cfg.Format = format
 			}
@@ -85,6 +89,7 @@ Examples:
 			language = cfg.Language
 			threshold = float32(cfg.Threshold)
 			matchThreshold = float32(cfg.MatchThreshold)
+			matchMargin = float32(cfg.MatchMargin)
 			format = cfg.Format
 			minSampleDuration = cfg.MinSampleDuration
 			minSampleRMS = cfg.MinSampleRMS
@@ -216,6 +221,7 @@ Examples:
 			// 11. Resolve speaker names (WeSpeaker 256-dim centroid embeddings)
 			fmt.Fprintf(os.Stderr, "[7/9] Resolving speaker identities...\n")
 			fmt.Fprintf(os.Stderr, "  --match-threshold=%.2f (higher=stricter matching, lower=more lenient)\n", matchThreshold)
+			fmt.Fprintf(os.Stderr, "  --match-margin=%.2f (min gap between best and runner-up profile)\n", matchMargin)
 			store := speaker.NewStore(speakersDir, config.SupportedAudioExtensions())
 
 			// Auto-enroll: extract voiceprint from concatenated wav
@@ -243,7 +249,7 @@ Examples:
 
 			speakerNames, err := diarize.ResolveSpeakerNames(
 				speakerIDs, diarResult, wavSamples, wavSampleRate,
-				profiles, matchThreshold, store, bins.Diarize, learn,
+				profiles, matchThreshold, matchMargin, store, bins.Diarize, learn,
 				minSampleDuration, minSampleRMS,
 			)
 			if err != nil {
@@ -372,6 +378,7 @@ Examples:
 				Language:          language,
 				Threshold:         float64(threshold),
 				MatchThreshold:    float64(matchThreshold),
+				MatchMargin:       float64(matchMargin),
 				Format:            format,
 				Vocabulary:        vocabToSave,
 				MinSampleDuration: minSampleDuration,
@@ -391,7 +398,8 @@ Examples:
 	cmd.Flags().StringVar(&format, "format", "txt", "output format: txt|json|srt|all (comma-separated)")
 	cmd.Flags().StringVarP(&language, "language", "l", "auto", "language: auto|zh-TW|zh|en|ja")
 	cmd.Flags().Float32Var(&threshold, "threshold", 0.8, "diarization clustering threshold (higher = more speakers)")
-	cmd.Flags().Float32Var(&matchThreshold, "match-threshold", 0.55, "speaker matching threshold for enrolled profiles")
+	cmd.Flags().Float32Var(&matchThreshold, "match-threshold", 0.65, "speaker matching threshold for enrolled profiles")
+	cmd.Flags().Float32Var(&matchMargin, "match-margin", 0.07, "minimum cosine gap between best and runner-up profile to accept a match")
 	cmd.Flags().IntVar(&numSpeakers, "num-speakers", 0, "expected number of speakers (0 = auto-detect)")
 	cmd.Flags().BoolVarP(&learn, "learning-mode", "L", false, "create folders for all clusters (including matched) for manual review")
 	cmd.Flags().BoolVar(&enhance, "enhance", false, "enhance audio with DeepFilterNet3 noise reduction before processing")

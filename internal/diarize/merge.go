@@ -50,15 +50,33 @@ type matchDetail struct {
 }
 
 // matchResultInfo holds the full matching result with details.
+//
+// BestSim is the highest cosine similarity across all profiles; RunnerUpSim
+// is the second-highest profile score (or -1 if fewer than 2 profiles have
+// a valid score). Matched is set when BestSim >= threshold; downstream code
+// applies the margin guard and uniqueness constraint separately.
 type matchResultInfo struct {
-	Matched bool
-	Name    string
-	BestSim float32
-	Details []matchDetail
+	Matched     bool
+	Name        string
+	BestSim     float32
+	RunnerUpSim float32
+	Details     []matchDetail
 }
 
 // ResolveSpeakerNames maps diarization speaker IDs to enrolled speaker names
 // using WeSpeaker centroid voiceprints from the diarization result.
+//
+// Assignment is done in two phases:
+//   1. Score every cluster against every enrolled profile.
+//   2. Assign clusters to names by descending best-similarity, enforcing
+//      one-to-one matching (each enrolled name claims at most one cluster)
+//      plus a margin guard (best - runner-up >= margin) to reject ambiguous
+//      matches. This is equivalent to Hungarian assignment on the small
+//      cluster x profile matrix typical for meeting transcription.
+//
+// Clusters that are unmatched, below threshold, ambiguous, or lose their
+// best-name to a stronger competitor fall back to "Unknown" (when their
+// longest segment is too short) or a fresh "speaker_N" profile.
 func ResolveSpeakerNames(
 	speakerIDs []string,
 	diarResult *DiarizeResult,
@@ -66,6 +84,7 @@ func ResolveSpeakerNames(
 	sampleRate int,
 	profiles []types.SpeakerProfile,
 	threshold float32,
+	margin float32,
 	store *speaker.Store,
 	diarizeBinPath string,
 	learn bool,
@@ -95,7 +114,7 @@ func ResolveSpeakerNames(
 		clusterDuration[seg.Speaker] += seg.End - seg.Start
 	}
 
-	// Sort cluster IDs for consistent output
+	// Sort cluster IDs alphabetically for consistent diagnostic output
 	var clusterIDs []string
 	for id := range clusterSet {
 		clusterIDs = append(clusterIDs, id)
@@ -104,7 +123,54 @@ func ResolveSpeakerNames(
 
 	fmt.Fprintf(os.Stderr, "  Diarization found %d clusters: %s\n", len(clusterIDs), strings.Join(clusterIDs, ", "))
 
+	// Phase 1: Score every cluster against every profile.
+	candidates := make(map[string]matchResultInfo)
+	for _, id := range clusterIDs {
+		if len(profiles) == 0 {
+			continue
+		}
+		centroid, ok := diarResult.SpeakerVoiceprints[id]
+		if !ok || len(centroid) == 0 {
+			continue
+		}
+		candidates[id] = matchAgainstProfilesDetailed(float64sToFloat32s(centroid), profiles, threshold)
+	}
+
+	// Phase 2: Greedy one-to-one assignment by descending best-similarity.
+	// (Equivalent to Hungarian for our small N; simpler to follow.)
+	type ranked struct {
+		id  string
+		sim float32
+	}
+	order := make([]ranked, 0, len(clusterIDs))
+	for _, id := range clusterIDs {
+		order = append(order, ranked{id, candidates[id].BestSim})
+	}
+	sort.SliceStable(order, func(i, j int) bool { return order[i].sim > order[j].sim })
+
 	clusterNames := make(map[string]string)
+	claimedBy := make(map[string]string) // profile name -> cluster id that won it
+
+	for _, r := range order {
+		cand, hasScores := candidates[r.id]
+		if !hasScores || cand.Name == "" {
+			continue // no profiles or no centroid -> handled in phase 3
+		}
+		if cand.BestSim < threshold {
+			continue
+		}
+		if cand.BestSim-cand.RunnerUpSim < margin {
+			continue // ambiguous
+		}
+		if _, taken := claimedBy[cand.Name]; taken {
+			continue // a stronger cluster already claimed this name
+		}
+		clusterNames[r.id] = cand.Name
+		claimedBy[cand.Name] = r.id
+	}
+
+	// Phase 3: Print per-cluster decisions and create fallback profiles
+	// for clusters that did not win an assignment, in alphabetical order.
 	nextUnknownID := scanMaxSpeakerID(store.Root()) + 1
 	matchedCount := 0
 	newCount := 0
@@ -113,53 +179,58 @@ func ResolveSpeakerNames(
 		dur := clusterDuration[clusterID]
 		fmt.Fprintf(os.Stderr, "\n  Cluster %s (%.1f min):\n", clusterID, dur/60)
 
-		var result matchResultInfo
-
-		if len(profiles) > 0 {
-			if centroid, ok := diarResult.SpeakerVoiceprints[clusterID]; ok && len(centroid) > 0 {
-				centroidF32 := float64sToFloat32s(centroid)
-				result = matchAgainstProfilesDetailed(centroidF32, profiles, threshold)
-
-				// Print per-profile PLDA similarity
-				for _, d := range result.Details {
-					fmt.Fprintf(os.Stderr, "    vs %-12s plda=%.2f (%d voiceprints)\n",
-						d.ProfileName+":", d.BestSim, d.NumVoiceprints)
-				}
-			} else {
-				fmt.Fprintf(os.Stderr, "    (no voiceprint available for this cluster)\n")
+		cand, hasScores := candidates[clusterID]
+		if hasScores {
+			for _, d := range cand.Details {
+				fmt.Fprintf(os.Stderr, "    vs %-12s sim=%.2f (%d voiceprints)\n",
+					d.ProfileName+":", d.BestSim, d.NumVoiceprints)
 			}
+		} else if len(profiles) > 0 {
+			fmt.Fprintf(os.Stderr, "    (no voiceprint available for this cluster)\n")
 		}
 
-		if result.Matched {
-			clusterNames[clusterID] = result.Name
+		if name, ok := clusterNames[clusterID]; ok {
 			matchedCount++
-			fmt.Fprintf(os.Stderr, "    → matched: %s (sim=%.2f, threshold=%.2f)\n", result.Name, result.BestSim, threshold)
-
+			fmt.Fprintf(os.Stderr, "    → matched: %s (sim=%.2f, threshold=%.2f, margin=%.2f)\n",
+				name, cand.BestSim, threshold, cand.BestSim-cand.RunnerUpSim)
 			if learn {
-				// Learning mode: also create speaker_N_match_Name/ folder for review
-				learnName := fmt.Sprintf("speaker_%d_match_%s", nextUnknownID, result.Name)
+				learnName := fmt.Sprintf("speaker_%d_match_%s", nextUnknownID, name)
 				nextUnknownID++
 				persistUnknownSpeaker(store, learnName, clusterID, diarResult, wavSamples, sampleRate, minSampleRMS)
 				fmt.Fprintf(os.Stderr, "    → [learn] created %s/ for review\n", learnName)
 			}
-		} else {
-			// Check if the cluster's longest segment meets the minimum duration
-			maxDur := maxSegmentDuration(diarResult.Segments, clusterID)
-			if maxDur < minSampleDuration {
-				clusterNames[clusterID] = "Unknown"
-				fmt.Fprintf(os.Stderr, "    → longest segment %.1fs < min %.1fs, marked as Unknown\n", maxDur, minSampleDuration)
-			} else {
-				name := fmt.Sprintf("speaker_%d", nextUnknownID)
-				nextUnknownID++
-				clusterNames[clusterID] = name
-				newCount++
-				persistUnknownSpeaker(store, name, clusterID, diarResult, wavSamples, sampleRate, minSampleRMS)
-				if result.BestSim > 0 {
-					fmt.Fprintf(os.Stderr, "    → no match (best=%.2f < threshold=%.2f), created %s\n", result.BestSim, threshold, name)
-				} else {
-					fmt.Fprintf(os.Stderr, "    → no enrolled profiles to match, created %s\n", name)
-				}
+			continue
+		}
+
+		// Diagnose why no match
+		reason := "no enrolled profiles to match"
+		if hasScores {
+			gap := cand.BestSim - cand.RunnerUpSim
+			switch {
+			case cand.Name == "":
+				// stays "no enrolled profiles to match"
+			case cand.BestSim < threshold:
+				reason = fmt.Sprintf("best=%.2f < threshold=%.2f", cand.BestSim, threshold)
+			case gap < margin:
+				reason = fmt.Sprintf("ambiguous (best=%.2f vs runner-up=%.2f, gap %.2f < margin %.2f)",
+					cand.BestSim, cand.RunnerUpSim, gap, margin)
+			case claimedBy[cand.Name] != "" && claimedBy[cand.Name] != clusterID:
+				reason = fmt.Sprintf("name %q claimed by stronger cluster %s", cand.Name, claimedBy[cand.Name])
 			}
+		}
+
+		maxDur := maxSegmentDuration(diarResult.Segments, clusterID)
+		if maxDur < minSampleDuration {
+			clusterNames[clusterID] = "Unknown"
+			fmt.Fprintf(os.Stderr, "    → %s; longest segment %.1fs < min %.1fs, marked as Unknown\n",
+				reason, maxDur, minSampleDuration)
+		} else {
+			name := fmt.Sprintf("speaker_%d", nextUnknownID)
+			nextUnknownID++
+			clusterNames[clusterID] = name
+			newCount++
+			persistUnknownSpeaker(store, name, clusterID, diarResult, wavSamples, sampleRate, minSampleRMS)
+			fmt.Fprintf(os.Stderr, "    → %s; created %s\n", reason, name)
 		}
 	}
 
@@ -194,12 +265,16 @@ func ResolveSpeakerNames(
 	return resultNames, nil
 }
 
-// matchAgainstProfilesDetailed compares a voiceprint against all enrolled profiles
-// and returns detailed per-profile similarity information.
+// matchAgainstProfilesDetailed compares a voiceprint against all enrolled
+// profiles and returns the best match along with the runner-up similarity
+// for downstream margin checks. Voiceprints with mismatched dimensions are
+// silently skipped (e.g. when a profile contains stale embeddings from a
+// different model).
 func matchAgainstProfilesDetailed(voiceprint []float32, profiles []types.SpeakerProfile, threshold float32) matchResultInfo {
 	var details []matchDetail
 	var bestName string
 	var bestSim float32 = -1
+	var runnerUpSim float32 = -1
 
 	for _, profile := range profiles {
 		var profileBestSim float32 = -1
@@ -219,22 +294,27 @@ func matchAgainstProfilesDetailed(voiceprint []float32, profiles []types.Speaker
 			NumVoiceprints: len(profile.Voiceprints),
 		})
 
-		if profileBestSim > bestSim {
+		switch {
+		case profileBestSim > bestSim:
+			runnerUpSim = bestSim
 			bestSim = profileBestSim
 			bestName = profile.Name
+		case profileBestSim > runnerUpSim:
+			runnerUpSim = profileBestSim
 		}
 	}
 
+	// Note: BestName is *always* set to the argmax profile (even when the
+	// score is below threshold), so callers can diagnose why a match
+	// failed. The Matched flag indicates whether the score meets threshold.
 	matched := bestSim >= threshold
-	if !matched {
-		bestName = ""
-	}
 
 	return matchResultInfo{
-		Matched: matched,
-		Name:    bestName,
-		BestSim: bestSim,
-		Details: details,
+		Matched:     matched,
+		Name:        bestName,
+		BestSim:     bestSim,
+		RunnerUpSim: runnerUpSim,
+		Details:     details,
 	}
 }
 

@@ -22,6 +22,7 @@ type Config struct {
 	Language       string
 	Threshold      float64
 	MatchThreshold float64
+	MatchMargin    float64 // minimum sim spread between best and runner-up profile to accept a match
 	Format         string
 	Strategy       string
 	Discover       bool
@@ -48,7 +49,8 @@ func Defaults() Config {
 	return Config{
 		Language:       "auto",
 		Threshold:      0.8,
-		MatchThreshold: 0.55,
+		MatchThreshold: 0.65,
+		MatchMargin:    0.07,
 		Format:         "txt",
 		Strategy:  "max_similarity",
 		Discover:          true,
@@ -78,6 +80,7 @@ func Load(configPath, speakersDir string) (Config, error) {
 	v.SetDefault("language", d.Language)
 	v.SetDefault("threshold", d.Threshold)
 	v.SetDefault("match_threshold", d.MatchThreshold)
+	v.SetDefault("match_margin", d.MatchMargin)
 	v.SetDefault("format", d.Format)
 	v.SetDefault("strategy", d.Strategy)
 	v.SetDefault("discover", d.Discover)
@@ -109,6 +112,7 @@ func Load(configPath, speakersDir string) (Config, error) {
 		Language:       v.GetString("language"),
 		Threshold:      v.GetFloat64("threshold"),
 		MatchThreshold: v.GetFloat64("match_threshold"),
+		MatchMargin:    v.GetFloat64("match_margin"),
 		Format:         v.GetString("format"),
 		Strategy:   v.GetString("strategy"),
 		Discover:   v.GetBool("discover"),
@@ -131,6 +135,7 @@ type SaveableConfig struct {
 	Language       string   `yaml:"language"`
 	Threshold      float64  `yaml:"threshold"`
 	MatchThreshold float64  `yaml:"match_threshold"`
+	MatchMargin    float64  `yaml:"match_margin"`
 	Format         string   `yaml:"format"`
 	Vocabulary        []string `yaml:"vocabulary,omitempty"`
 	MinSampleDuration float64  `yaml:"min_sample_duration"`
@@ -175,12 +180,19 @@ func writeConfigTemplate(configPath string, sc SaveableConfig) error {
 	lines = append(lines, "# Range: 0.0 - 1.0")
 	lines = append(lines, fmt.Sprintf("threshold: %.2f", sc.Threshold))
 	lines = append(lines, "")
-	lines = append(lines, "# Speaker matching threshold, cosine similarity (default: 0.55)")
+	lines = append(lines, "# Speaker matching threshold, cosine similarity (default: 0.65)")
 	lines = append(lines, "# Used when matching diarized clusters to enrolled speaker profiles.")
-	lines = append(lines, "#   Higher value (e.g. 0.7) -> stricter matching, fewer false positives")
-	lines = append(lines, "#   Lower value  (e.g. 0.4) -> more lenient, may match wrong speakers")
+	lines = append(lines, "# WeSpeaker / FluidAudio embeddings: EER ~0.65-0.75, so 0.65 is a")
+	lines = append(lines, "# balanced default. Lower -> more lenient, may match wrong speakers.")
 	lines = append(lines, "# Range: 0.0 - 1.0")
 	lines = append(lines, fmt.Sprintf("match_threshold: %.2f", sc.MatchThreshold))
+	lines = append(lines, "")
+	lines = append(lines, "# Speaker matching margin (default: 0.07)")
+	lines = append(lines, "# Minimum cosine similarity gap between the best and second-best enrolled")
+	lines = append(lines, "# profile required to accept a match. Smaller gaps are treated as")
+	lines = append(lines, "# ambiguous and the cluster is reassigned as a new speaker.")
+	lines = append(lines, "# Range: 0.0 - 0.3 (0 disables the margin guard)")
+	lines = append(lines, fmt.Sprintf("match_margin: %.2f", sc.MatchMargin))
 	lines = append(lines, "")
 	lines = append(lines, `# Output format (default: "txt")`)
 	lines = append(lines, `# Supported: "txt", "json", "srt", "all" (generates all three)`)
@@ -223,6 +235,7 @@ func writeConfigCompact(configPath string, sc SaveableConfig) error {
 	lines = append(lines, fmt.Sprintf("language: %q", sc.Language))
 	lines = append(lines, fmt.Sprintf("threshold: %.2f", sc.Threshold))
 	lines = append(lines, fmt.Sprintf("match_threshold: %.2f", sc.MatchThreshold))
+	lines = append(lines, fmt.Sprintf("match_margin: %.2f", sc.MatchMargin))
 	lines = append(lines, fmt.Sprintf("format: %q", sc.Format))
 	lines = append(lines, fmt.Sprintf("min_sample_duration: %.1f", sc.MinSampleDuration))
 	lines = append(lines, fmt.Sprintf("min_sample_rms: %.2f", sc.MinSampleRMS))

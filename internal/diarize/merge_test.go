@@ -125,7 +125,7 @@ func TestResolveSpeakerNames_ShortSegmentsMarkedUnknown(t *testing.T) {
 	names, err := ResolveSpeakerNames(
 		speakerIDs, diarResult, wavSamples, sampleRate,
 		[]types.SpeakerProfile{}, // no enrolled profiles
-		0.55, store, "", false,
+		0.55, 0.07, store, "", false,
 		15.0, // minSampleDuration
 		0.01, // minSampleRMS
 	)
@@ -169,7 +169,7 @@ func TestResolveSpeakerNames_ZeroThresholdAllowsAll(t *testing.T) {
 
 	names, err := ResolveSpeakerNames(
 		speakerIDs, diarResult, wavSamples, sampleRate,
-		[]types.SpeakerProfile{}, 0.55, store, "", false,
+		[]types.SpeakerProfile{}, 0.55, 0.07, store, "", false,
 		0.0,  // minSampleDuration = 0 → allow all
 		0.01,
 	)
