@@ -124,6 +124,50 @@ func TestStore_LoadProfiles_WithProfile(t *testing.T) {
 	}
 }
 
+// When multiple *.profile.json files reference the same audio hash (which
+// happens after manual edits or when older versions wrote duplicates),
+// LoadProfile must dedup. Otherwise FindNewAudioFiles sees a longer
+// known_hashes list than expected and the merge profile grows unbounded
+// over successive auto-enrolls.
+func TestStore_LoadProfile_DedupsKnownAudioHashes(t *testing.T) {
+	dir := t.TempDir()
+	speakerDir := filepath.Join(dir, "Alice")
+	os.MkdirAll(speakerDir, 0755)
+
+	common := "sha256:0123456789abcdef"
+	p1 := types.SpeakerProfile{
+		KnownAudioHashes: []string{common, "sha256:aaa"},
+	}
+	p2 := types.SpeakerProfile{
+		KnownAudioHashes: []string{common, "sha256:bbb"},
+	}
+	d1, _ := json.MarshalIndent(p1, "", "  ")
+	d2, _ := json.MarshalIndent(p2, "", "  ")
+	os.WriteFile(filepath.Join(speakerDir, "20240101-aaaa.profile.json"), d1, 0644)
+	os.WriteFile(filepath.Join(speakerDir, "20240102-bbbb.profile.json"), d2, 0644)
+
+	store := NewStore(dir, supportedExtensions())
+	prof, err := store.LoadProfile("Alice")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if prof == nil {
+		t.Fatal("profile is nil")
+	}
+	// Expect 3 unique hashes, not 4.
+	if len(prof.KnownAudioHashes) != 3 {
+		t.Errorf("KnownAudioHashes len = %d, want 3 (deduped). Got %v",
+			len(prof.KnownAudioHashes), prof.KnownAudioHashes)
+	}
+	seen := map[string]bool{}
+	for _, h := range prof.KnownAudioHashes {
+		if seen[h] {
+			t.Errorf("duplicate hash in merged profile: %q", h)
+		}
+		seen[h] = true
+	}
+}
+
 func TestStore_SaveProfile(t *testing.T) {
 	dir := t.TempDir()
 	store := NewStore(dir, supportedExtensions())

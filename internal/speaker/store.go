@@ -103,6 +103,7 @@ func (s *Store) LoadProfile(name string) (*types.SpeakerProfile, error) {
 	merged := &types.SpeakerProfile{
 		Name: name,
 	}
+	hashSet := make(map[string]struct{})
 	found := false
 
 	for _, e := range entries {
@@ -126,8 +127,16 @@ func (s *Store) LoadProfile(name string) (*types.SpeakerProfile, error) {
 		// Merge voiceprints
 		merged.Voiceprints = append(merged.Voiceprints, p.Voiceprints...)
 
-		// Merge known audio hashes
-		merged.KnownAudioHashes = append(merged.KnownAudioHashes, p.KnownAudioHashes...)
+		// Merge known audio hashes, deduplicating (MergeProfileFiles already
+		// dedups on write, but profile files written by older versions or
+		// manually edited may contain duplicates).
+		for _, h := range p.KnownAudioHashes {
+			if _, seen := hashSet[h]; seen {
+				continue
+			}
+			hashSet[h] = struct{}{}
+			merged.KnownAudioHashes = append(merged.KnownAudioHashes, h)
+		}
 
 		// Track earliest created_at and latest updated_at
 		if merged.CreatedAt == "" || (p.CreatedAt != "" && p.CreatedAt < merged.CreatedAt) {

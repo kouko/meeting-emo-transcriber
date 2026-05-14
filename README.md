@@ -115,7 +115,8 @@ metr meeting.mp3 --no-cache                 # Force re-transcription (skip cache
 | `--format` | | `txt` | `txt`, `json`, `srt`, `all`, or comma-separated |
 | `--language` | `-l` | `auto` | `auto`, `zh-TW`, `zh`, `en`, `ja` |
 | `--threshold` | | `0.80` | Diarization clustering threshold (higher = more speakers) |
-| `--match-threshold` | | `0.55` | Speaker matching cosine similarity threshold |
+| `--match-threshold` | | `0.65` | Speaker matching cosine similarity threshold |
+| `--match-margin` | | `0.07` | Min cosine gap between best & runner-up profile to accept a match |
 | `--num-speakers` | | `0` | Expected number of speakers (0 = auto-detect) |
 | `--learning-mode` | `-L` | `false` | Create folders for all detected speakers for review |
 | `--enhance` | | `false` | DeepFilterNet3 noise reduction before processing |
