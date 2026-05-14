@@ -88,3 +88,38 @@ func TestMatcherMatch_EmptyProfiles(t *testing.T) {
 		t.Errorf("expected empty name for no profiles, got %q", result.Name)
 	}
 }
+
+func TestBestSimilarity_PicksHighest(t *testing.T) {
+	profile := types.SpeakerProfile{
+		Voiceprints: []types.Voiceprint{
+			{Vector: []float32{0, 1, 0}}, // orthogonal
+			{Vector: []float32{1, 0, 0}}, // matches
+			{Vector: []float32{0, 0, 1}}, // orthogonal
+		},
+	}
+	got := BestSimilarity([]float32{0.99, 0.1, 0}, profile)
+	if got < 0.98 {
+		t.Errorf("got %f, want >= 0.98 (closest voiceprint match)", got)
+	}
+}
+
+func TestBestSimilarity_DimMismatchSkipped(t *testing.T) {
+	profile := types.SpeakerProfile{
+		Voiceprints: []types.Voiceprint{
+			{Vector: []float32{1, 0}},       // 2-d, will be skipped
+			{Vector: []float32{1, 0, 0, 0}}, // 4-d, will be skipped
+		},
+	}
+	// All voiceprints mismatch the 3-d query — best stays at -1.
+	got := BestSimilarity([]float32{1, 0, 0}, profile)
+	if got != -1 {
+		t.Errorf("got %f, want -1 (no compatible voiceprint)", got)
+	}
+}
+
+func TestBestSimilarity_EmptyProfile(t *testing.T) {
+	got := BestSimilarity([]float32{1, 0, 0}, types.SpeakerProfile{})
+	if got != -1 {
+		t.Errorf("got %f, want -1 (no voiceprints)", got)
+	}
+}

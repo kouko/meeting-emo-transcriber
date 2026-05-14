@@ -279,16 +279,7 @@ func matchAgainstProfilesDetailed(voiceprint []float32, profiles []types.Speaker
 	var runnerUpSim float32 = -1
 
 	for _, profile := range profiles {
-		var profileBestSim float32 = -1
-		for _, vp := range profile.Voiceprints {
-			if len(vp.Vector) != len(voiceprint) {
-				continue
-			}
-			sim := speaker.CosineSimilarity(voiceprint, vp.Vector)
-			if sim > profileBestSim {
-				profileBestSim = sim
-			}
-		}
+		profileBestSim := speaker.BestSimilarity(voiceprint, profile)
 
 		details = append(details, matchDetail{
 			ProfileName:    profile.Name,

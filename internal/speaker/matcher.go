@@ -22,6 +22,28 @@ func CosineSimilarity(a, b []float32) float32 {
 	return dot / denom
 }
 
+// BestSimilarity returns the highest cosine similarity between emb and any
+// voiceprint vector in profile. Voiceprints with mismatched dimensions are
+// silently skipped (a different model may have produced the stored vector).
+// Returns -1 when no compatible voiceprint exists.
+//
+// This is the canonical helper used by both cluster-level matching and
+// per-segment re-verification — keeping a single implementation here
+// prevents subtle drift between the two scoring paths.
+func BestSimilarity(emb []float32, profile types.SpeakerProfile) float32 {
+	var best float32 = -1
+	for _, vp := range profile.Voiceprints {
+		if len(vp.Vector) != len(emb) {
+			continue
+		}
+		sim := CosineSimilarity(emb, vp.Vector)
+		if sim > best {
+			best = sim
+		}
+	}
+	return best
+}
+
 type MatchStrategy interface {
 	Score(segmentEmb []float32, profile types.SpeakerProfile) float32
 }
@@ -29,14 +51,7 @@ type MatchStrategy interface {
 type MaxSimilarityStrategy struct{}
 
 func (s *MaxSimilarityStrategy) Score(segmentEmb []float32, profile types.SpeakerProfile) float32 {
-	var maxSim float32 = -1
-	for _, sample := range profile.Voiceprints {
-		sim := CosineSimilarity(segmentEmb, sample.Vector)
-		if sim > maxSim {
-			maxSim = sim
-		}
-	}
-	return maxSim
+	return BestSimilarity(segmentEmb, profile)
 }
 
 type Matcher struct {

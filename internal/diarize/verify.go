@@ -121,7 +121,7 @@ func RefineSpeakerNamesPerSegment(
 			continue
 		}
 		profile := profMap[speakerNames[t.idx]]
-		sim := bestSimAgainstProfile(emb, profile)
+		sim := speaker.BestSimilarity(emb, profile)
 		if sim < threshold {
 			refined[t.idx] = "Unknown"
 			demoted++
@@ -135,20 +135,4 @@ func RefineSpeakerNamesPerSegment(
 	}
 
 	return refined, nil
-}
-
-// bestSimAgainstProfile returns the highest cosine similarity between
-// emb and any voiceprint in profile (skipping dim-mismatched entries).
-func bestSimAgainstProfile(emb []float32, profile types.SpeakerProfile) float32 {
-	var best float32 = -1
-	for _, vp := range profile.Voiceprints {
-		if len(vp.Vector) != len(emb) {
-			continue
-		}
-		sim := speaker.CosineSimilarity(emb, vp.Vector)
-		if sim > best {
-			best = sim
-		}
-	}
-	return best
 }
