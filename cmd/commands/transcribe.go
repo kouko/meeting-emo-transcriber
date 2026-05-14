@@ -33,6 +33,7 @@ func newTranscribeCmd() *cobra.Command {
 		matchThreshold float32
 		matchMargin    float32
 		numSpeakers    int
+		dryRun         bool
 		learn          bool
 		enhance        bool
 		normalize      bool
@@ -127,11 +128,16 @@ Examples:
 			defer sherpaClient.Close()
 
 			// 4. Ensure ASR model
-			fmt.Fprintf(os.Stderr, "[2/9] Ensuring ASR model...\n")
-			asrModelName := models.ResolveASRModel(language)
-			asrModelPath, err := models.EnsureModel(asrModelName)
-			if err != nil {
-				return fmt.Errorf("ensure ASR model: %w", err)
+			var asrModelPath string
+			if !dryRun {
+				fmt.Fprintf(os.Stderr, "[2/9] Ensuring ASR model...\n")
+				asrModelName := models.ResolveASRModel(language)
+				asrModelPath, err = models.EnsureModel(asrModelName)
+				if err != nil {
+					return fmt.Errorf("ensure ASR model: %w", err)
+				}
+			} else {
+				fmt.Fprintf(os.Stderr, "[dry-run] Skipping ASR model + emotion classifier — diarize + matching only\n")
 			}
 
 			// 5. Create temp dir and convert to WAV
@@ -161,53 +167,55 @@ Examples:
 				tempWavPath = enhancedPath
 			}
 
-			// 7. Run ASR
-			fmt.Fprintf(os.Stderr, "[4/9] Running speech recognition...\n")
-			// Merge --prompt + config vocabulary + enrolled speaker names
-			allPrompt := mergePrompts(prompt, cfg.Vocabulary)
-			if names, err := listSpeakerNames(speakersDir); err == nil && len(names) > 0 {
-				allPrompt = appendSpeakerNames(allPrompt, names)
-			}
-			if allPrompt != "" {
-				fmt.Fprintf(os.Stderr, "  --prompt=%q\n", allPrompt)
-			}
-
-			whisperCfg := asr.WhisperConfig{
-				BinPath:      bins.WhisperCLI,
-				ModelPath:    asrModelPath,
-				Language:     language,
-				Threads:      cfg.Threads,
-				Prompt:       allPrompt,
-			}
+			// 7. Run ASR (skipped in dry-run)
 			var results []types.ASRResult
-			if noCache {
-				results, err = asr.Transcribe(whisperCfg, tempWavPath)
-			} else {
-				results, err = asr.TranscribeWithCache(whisperCfg, tempWavPath)
-			}
-			if err != nil {
-				return fmt.Errorf("transcribe: %w", err)
-			}
-
-			// 5. Initialize punctuator (ZH/EN only, skip JA) — used later in TXT output
 			var punctFunc func(string) string
-			if language != "ja" {
-				puncModelDir, puncErr := models.EnsureModel("ct-punc-zh-en-int8")
-				if puncErr == nil {
-					punc, puncInitErr := punctuation.NewPunctuator(sherpaClient, puncModelDir, cfg.Threads)
-					if puncInitErr == nil {
-						fmt.Fprintf(os.Stderr, "[5/9] Punctuation model loaded\n")
-						defer punc.Close()
-						lang := language
-						punctFunc = func(text string) string {
-							return punc.AddPunct(text, lang)
-						}
-					} else {
-						puncErr = puncInitErr
-					}
+			if !dryRun {
+				fmt.Fprintf(os.Stderr, "[4/9] Running speech recognition...\n")
+				// Merge --prompt + config vocabulary + enrolled speaker names
+				allPrompt := mergePrompts(prompt, cfg.Vocabulary)
+				if names, err := listSpeakerNames(speakersDir); err == nil && len(names) > 0 {
+					allPrompt = appendSpeakerNames(allPrompt, names)
 				}
-				if puncErr != nil {
-					fmt.Fprintf(os.Stderr, "  Warning: punctuation skipped: %v\n", puncErr)
+				if allPrompt != "" {
+					fmt.Fprintf(os.Stderr, "  --prompt=%q\n", allPrompt)
+				}
+
+				whisperCfg := asr.WhisperConfig{
+					BinPath:   bins.WhisperCLI,
+					ModelPath: asrModelPath,
+					Language:  language,
+					Threads:   cfg.Threads,
+					Prompt:    allPrompt,
+				}
+				if noCache {
+					results, err = asr.Transcribe(whisperCfg, tempWavPath)
+				} else {
+					results, err = asr.TranscribeWithCache(whisperCfg, tempWavPath)
+				}
+				if err != nil {
+					return fmt.Errorf("transcribe: %w", err)
+				}
+
+				// 5. Initialize punctuator (ZH/EN only, skip JA) — used later in TXT output
+				if language != "ja" {
+					puncModelDir, puncErr := models.EnsureModel("ct-punc-zh-en-int8")
+					if puncErr == nil {
+						punc, puncInitErr := punctuation.NewPunctuator(sherpaClient, puncModelDir, cfg.Threads)
+						if puncInitErr == nil {
+							fmt.Fprintf(os.Stderr, "[5/9] Punctuation model loaded\n")
+							defer punc.Close()
+							lang := language
+							punctFunc = func(text string) string {
+								return punc.AddPunct(text, lang)
+							}
+						} else {
+							puncErr = puncInitErr
+						}
+					}
+					if puncErr != nil {
+						fmt.Fprintf(os.Stderr, "  Warning: punctuation skipped: %v\n", puncErr)
+					}
 				}
 			}
 
@@ -231,7 +239,20 @@ Examples:
 			}
 
 			// 10. Assign speakers to ASR segments
-			speakerIDs := diarize.AssignSpeakers(results, diarResult.Segments)
+			// In dry-run, we have no ASR results; treat each diarization
+			// segment as a pseudo-ASR result so the matcher still sees the
+			// full cluster set and prints its decisions.
+			var speakerIDs []string
+			if dryRun {
+				results = make([]types.ASRResult, len(diarResult.Segments))
+				speakerIDs = make([]string, len(diarResult.Segments))
+				for i, seg := range diarResult.Segments {
+					results[i] = types.ASRResult{Start: seg.Start, End: seg.End}
+					speakerIDs[i] = seg.Speaker
+				}
+			} else {
+				speakerIDs = diarize.AssignSpeakers(results, diarResult.Segments)
+			}
 
 			// 11. Resolve speaker names (WeSpeaker 256-dim centroid embeddings)
 			fmt.Fprintf(os.Stderr, "[7/9] Resolving speaker identities...\n")
@@ -310,6 +331,14 @@ Examples:
 				} else {
 					speakerNames = refined
 				}
+			}
+
+			// Dry-run: stop here. Matching decisions have been printed to
+			// stderr by ResolveSpeakerNames; no transcript is produced.
+			if dryRun {
+				fmt.Fprintf(os.Stderr, "\nDry run complete. No transcript written.\n")
+				fmt.Fprintf(os.Stderr, "Re-run without --dry-run, or with adjusted --match-threshold / --match-margin, to produce a transcript.\n")
+				return nil
 			}
 
 			// 13. Emotion classification + build segments
@@ -456,6 +485,7 @@ Examples:
 	cmd.Flags().Float32Var(&threshold, "threshold", 0.8, "diarization clustering threshold (higher = more speakers)")
 	cmd.Flags().Float32Var(&matchThreshold, "match-threshold", 0.65, "speaker matching threshold for enrolled profiles")
 	cmd.Flags().Float32Var(&matchMargin, "match-margin", 0.07, "minimum cosine gap between best and runner-up profile to accept a match")
+	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "skip ASR/emotion/output — only run diarize + speaker matching (fast threshold tuning)")
 	cmd.Flags().BoolVar(&verifySegments, "verify-segments", false, "re-verify each ASR segment against its matched profile and demote stray segments to Unknown")
 	cmd.Flags().Float32Var(&verifySegmentsThreshold, "verify-threshold", 0.50, "per-segment verification threshold (looser than --match-threshold)")
 	cmd.Flags().Float64Var(&verifySegmentsMinDuration, "verify-min-duration", 1.0, "minimum segment duration (seconds) to re-verify")
