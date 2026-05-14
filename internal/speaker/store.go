@@ -43,6 +43,8 @@ func (s *Store) Root() string {
 }
 
 // List returns the names of all subdirectories in the root (each is a speaker).
+// Entries whose name starts with "_" are reserved (e.g. "_metr/" holds the
+// config file and learn-mode review output) and are excluded.
 func (s *Store) List() ([]string, error) {
 	entries, err := os.ReadDir(s.root)
 	if err != nil {
@@ -54,9 +56,13 @@ func (s *Store) List() ([]string, error) {
 
 	var names []string
 	for _, e := range entries {
-		if e.IsDir() {
-			names = append(names, e.Name())
+		if !e.IsDir() {
+			continue
 		}
+		if strings.HasPrefix(e.Name(), "_") {
+			continue
+		}
+		names = append(names, e.Name())
 	}
 	return names, nil
 }

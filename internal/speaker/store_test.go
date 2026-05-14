@@ -41,6 +41,38 @@ func TestStore_ListWithSpeakers(t *testing.T) {
 	}
 }
 
+// _-prefixed directories are reserved for system use (e.g. _metr for
+// config + learn-mode review output) and must never be treated as
+// enrolled speakers.
+func TestStore_List_SkipsUnderscoreDirs(t *testing.T) {
+	dir := t.TempDir()
+	os.MkdirAll(filepath.Join(dir, "Alice"), 0755)
+	os.MkdirAll(filepath.Join(dir, "_metr"), 0755)
+	os.MkdirAll(filepath.Join(dir, "_review"), 0755)
+	os.MkdirAll(filepath.Join(dir, "Bob"), 0755)
+	os.MkdirAll(filepath.Join(dir, "speaker_1"), 0755) // auto-discovered, still a speaker
+
+	store := NewStore(dir, supportedExtensions())
+	names, err := store.List()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := make(map[string]bool)
+	for _, n := range names {
+		got[n] = true
+	}
+	for _, want := range []string{"Alice", "Bob", "speaker_1"} {
+		if !got[want] {
+			t.Errorf("expected %q in list, missing", want)
+		}
+	}
+	for _, banned := range []string{"_metr", "_review"} {
+		if got[banned] {
+			t.Errorf("expected %q to be filtered, but appeared in list", banned)
+		}
+	}
+}
+
 func TestStore_ListNonExistentDir(t *testing.T) {
 	store := NewStore("/nonexistent/path", supportedExtensions())
 	names, err := store.List()

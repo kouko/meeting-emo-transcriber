@@ -3,6 +3,7 @@ package diarize
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/kouko/meeting-emo-transcriber/internal/config"
@@ -284,6 +285,73 @@ func TestResolveSpeakerNames_AmbiguousMatch_RejectedByMargin(t *testing.T) {
 	}
 	if names[0] != "speaker_1" {
 		t.Errorf("names[0] = %q, want speaker_1 (margin guard rejects ambiguous match)", names[0])
+	}
+}
+
+// Learn mode writes review samples under <root>/_metr/review/ rather than at
+// the root, so subsequent runs do not pick them up as new enrolled speakers.
+func TestResolveSpeakerNames_LearnMode_WritesToReviewSubdir(t *testing.T) {
+	store := newTestStore(t)
+	sampleRate := 16000
+	wavSamples := generateSineWAV(sampleRate, 30.0, 0.5)
+
+	profiles := []types.SpeakerProfile{
+		{Name: "Alice", Voiceprints: []types.Voiceprint{{Vector: []float32{1, 0, 0}}}},
+	}
+	diarResult := &DiarizeResult{
+		Segments: []Segment{
+			{Start: 0, End: 20, Speaker: "C1"},
+		},
+		SpeakerVoiceprints: map[string][]float64{
+			"C1": {0.99, 0.1, 0},
+		},
+	}
+
+	names, err := ResolveSpeakerNames(
+		[]string{"C1"}, diarResult, wavSamples, sampleRate,
+		profiles, 0.55, 0.07, store, "", true, // learn=true
+		15.0, 0.01,
+	)
+	if err != nil {
+		t.Fatalf("ResolveSpeakerNames: %v", err)
+	}
+	if names[0] != "Alice" {
+		t.Fatalf("names[0] = %q, want Alice", names[0])
+	}
+
+	// The review directory must exist under _metr/review/, not at root.
+	reviewParent := filepath.Join(store.Root(), "_metr", "review")
+	entries, err := os.ReadDir(reviewParent)
+	if err != nil {
+		t.Fatalf("expected _metr/review/ to be created: %v", err)
+	}
+	if len(entries) == 0 {
+		t.Fatal("_metr/review/ is empty; learn-mode output not written")
+	}
+	foundReview := false
+	for _, e := range entries {
+		if e.IsDir() && strings.HasPrefix(e.Name(), "speaker_") && strings.Contains(e.Name(), "_match_Alice") {
+			foundReview = true
+			break
+		}
+	}
+	if !foundReview {
+		t.Errorf("no speaker_*_match_Alice dir under _metr/review/; got entries: %v", entries)
+	}
+
+	// The review dir must NOT appear at root (would pollute Store.List).
+	rootEntries, _ := os.ReadDir(store.Root())
+	for _, e := range rootEntries {
+		if strings.Contains(e.Name(), "_match_") {
+			t.Errorf("learn-mode review leaked to root: %q", e.Name())
+		}
+	}
+	// And Store.List must NOT include _metr.
+	listed, _ := store.List()
+	for _, name := range listed {
+		if name == "_metr" || strings.HasPrefix(name, "_") {
+			t.Errorf("Store.List returned reserved entry %q", name)
+		}
 	}
 }
 

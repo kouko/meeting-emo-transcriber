@@ -39,10 +39,10 @@ func TestPersistUnknownSpeaker_RMSFilter(t *testing.T) {
 		},
 	}
 
-	persistUnknownSpeaker(store, "test_speaker", "C1", diarResult, wavSamples, sampleRate, 0.01)
+	speakerDir := filepath.Join(store.Root(), "test_speaker")
+	persistUnknownSpeaker(speakerDir, "C1", diarResult, wavSamples, sampleRate, 0.01)
 
 	// Should save 2 WAV files (the two loud segments), not the silent one
-	speakerDir := filepath.Join(dir, "test_speaker")
 	entries, err := os.ReadDir(speakerDir)
 	if err != nil {
 		t.Fatalf("read speaker dir: %v", err)
@@ -74,10 +74,10 @@ func TestPersistUnknownSpeaker_AllSilent(t *testing.T) {
 		},
 	}
 
-	persistUnknownSpeaker(store, "silent_speaker", "C1", diarResult, wavSamples, sampleRate, 0.01)
+	speakerDir := filepath.Join(store.Root(), "silent_speaker")
+	persistUnknownSpeaker(speakerDir, "C1", diarResult, wavSamples, sampleRate, 0.01)
 
 	// Should save 0 WAV files, but profile.json should still exist
-	speakerDir := filepath.Join(dir, "silent_speaker")
 	entries, err := os.ReadDir(speakerDir)
 	if err != nil {
 		t.Fatalf("read speaker dir: %v", err)

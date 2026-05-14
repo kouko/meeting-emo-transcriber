@@ -2,6 +2,7 @@ package diarize
 
 import (
 	"crypto/rand"
+	"encoding/json"
 	"fmt"
 	"math"
 	"os"
@@ -196,8 +197,9 @@ func ResolveSpeakerNames(
 			if learn {
 				learnName := fmt.Sprintf("speaker_%d_match_%s", nextUnknownID, name)
 				nextUnknownID++
-				persistUnknownSpeaker(store, learnName, clusterID, diarResult, wavSamples, sampleRate, minSampleRMS)
-				fmt.Fprintf(os.Stderr, "    → [learn] created %s/ for review\n", learnName)
+				reviewDir := filepath.Join(store.Root(), "_metr", "review", learnName)
+				persistUnknownSpeaker(reviewDir, clusterID, diarResult, wavSamples, sampleRate, minSampleRMS)
+				fmt.Fprintf(os.Stderr, "    → [learn] created _metr/review/%s/ for review\n", learnName)
 			}
 			continue
 		}
@@ -229,7 +231,7 @@ func ResolveSpeakerNames(
 			nextUnknownID++
 			clusterNames[clusterID] = name
 			newCount++
-			persistUnknownSpeaker(store, name, clusterID, diarResult, wavSamples, sampleRate, minSampleRMS)
+			persistUnknownSpeaker(filepath.Join(store.Root(), name), clusterID, diarResult, wavSamples, sampleRate, minSampleRMS)
 			fmt.Fprintf(os.Stderr, "    → %s; created %s\n", reason, name)
 		}
 	}
@@ -340,10 +342,20 @@ func maxSegmentDuration(segments []Segment, clusterID string) float64 {
 	return maxDur
 }
 
-func persistUnknownSpeaker(store *speaker.Store, name, clusterID string, diarResult *DiarizeResult, wavSamples []float32, sampleRate int, minRMS float64) {
-	speakerDir := filepath.Join(store.Root(), name)
-	os.MkdirAll(speakerDir, 0755)
+// persistUnknownSpeaker writes top-3 longest cluster segments as wav files
+// and a profile.json (with the cluster's centroid voiceprint) under
+// targetDir. targetDir is expected to be the speaker's own directory:
+//   - <root>/speaker_N/                          for auto-discovered unknowns
+//   - <root>/_metr/review/speaker_N_match_Name/  for learn-mode review samples
+// The latter location keeps review artefacts out of Store.List() so they
+// are not picked up as new speakers on the next run.
+func persistUnknownSpeaker(targetDir, clusterID string, diarResult *DiarizeResult, wavSamples []float32, sampleRate int, minRMS float64) {
+	if err := os.MkdirAll(targetDir, 0755); err != nil {
+		fmt.Fprintf(os.Stderr, "    warning: failed to create %s: %v\n", targetDir, err)
+		return
+	}
 
+	displayName := filepath.Base(targetDir)
 	now := time.Now()
 	datePrefix := now.Format("20060102")
 	uuid := shortUUID()
@@ -361,7 +373,6 @@ func persistUnknownSpeaker(store *speaker.Store, name, clusterID string, diarRes
 	}
 	sort.Slice(segs, func(i, j int) bool { return segs[i].len > segs[j].len })
 
-	var audioHashes []string
 	maxSamples := 3
 	saved := 0
 	for i := 0; i < len(segs) && saved < maxSamples; i++ {
@@ -370,15 +381,15 @@ func persistUnknownSpeaker(store *speaker.Store, name, clusterID string, diarRes
 			continue
 		}
 		wavName := fmt.Sprintf("%s-%s-%d.wav", datePrefix, uuid, saved+1)
-		wavPath := filepath.Join(speakerDir, wavName)
-		audio.WriteWAV(wavPath, segAudio, sampleRate)
-
-		hash, _ := speaker.FileHash(wavPath)
-		audioHashes = append(audioHashes, hash)
+		wavPath := filepath.Join(targetDir, wavName)
+		if err := audio.WriteWAV(wavPath, segAudio, sampleRate); err != nil {
+			fmt.Fprintf(os.Stderr, "    warning: failed to write %s: %v\n", wavPath, err)
+			continue
+		}
 		saved++
 	}
 	if saved == 0 {
-		fmt.Fprintf(os.Stderr, "    warning: no segments with sufficient audio energy for %s\n", name)
+		fmt.Fprintf(os.Stderr, "    warning: no segments with sufficient audio energy for %s\n", displayName)
 	}
 
 	// Build profile with centroid voiceprint
@@ -402,8 +413,15 @@ func persistUnknownSpeaker(store *speaker.Store, name, clusterID string, diarRes
 		Voiceprints:      voiceprints,
 	}
 
-	profileFilename := fmt.Sprintf("%s-%s.profile.json", datePrefix, uuid)
-	store.SaveProfile(name, profileFilename, profile)
+	profilePath := filepath.Join(targetDir, fmt.Sprintf("%s-%s.profile.json", datePrefix, uuid))
+	data, err := json.MarshalIndent(profile, "", "  ")
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "    warning: marshal profile for %s: %v\n", displayName, err)
+		return
+	}
+	if err := os.WriteFile(profilePath, data, 0644); err != nil {
+		fmt.Fprintf(os.Stderr, "    warning: write profile for %s: %v\n", displayName, err)
+	}
 }
 
 func shortUUID() string {
