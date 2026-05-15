@@ -6,14 +6,12 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
-	"time"
 
+	"github.com/kouko/meeting-emo-transcriber/embedded"
 	"github.com/kouko/meeting-emo-transcriber/internal/asr"
 	"github.com/kouko/meeting-emo-transcriber/internal/audio"
 	"github.com/kouko/meeting-emo-transcriber/internal/config"
-	"github.com/kouko/meeting-emo-transcriber/embedded"
 	"github.com/kouko/meeting-emo-transcriber/internal/diarize"
-	"github.com/kouko/meeting-emo-transcriber/internal/emotion"
 	"github.com/kouko/meeting-emo-transcriber/internal/models"
 	"github.com/kouko/meeting-emo-transcriber/internal/output"
 	"github.com/kouko/meeting-emo-transcriber/internal/punctuation"
@@ -25,22 +23,22 @@ import (
 
 func newTranscribeCmd() *cobra.Command {
 	var (
-		inputPath      string
-		outputPath     string
-		format         string
-		language       string
-		threshold      float32
-		matchThreshold float32
-		matchMargin    float32
-		numSpeakers    int
-		dryRun         bool
-		learn          bool
-		enhance        bool
-		normalize      bool
-		noCache           bool
-		prompt            string
-		minSampleDuration float64
-		minSampleRMS      float64
+		inputPath                 string
+		outputPath                string
+		format                    string
+		language                  string
+		threshold                 float32
+		matchThreshold            float32
+		matchMargin               float32
+		numSpeakers               int
+		dryRun                    bool
+		learn                     bool
+		enhance                   bool
+		normalize                 bool
+		noCache                   bool
+		prompt                    string
+		minSampleDuration         float64
+		minSampleRMS              float64
 		verifySegments            bool
 		verifySegmentsThreshold   float32
 		verifySegmentsMinDuration float64
@@ -343,95 +341,18 @@ Examples:
 
 			// 13. Emotion classification + build segments
 			fmt.Fprintf(os.Stderr, "[8/9] Running emotion classification...\n")
-			emotionModelDir, err := models.EnsureModel("sensevoice-small-int8")
+			transcript, err := classifyEmotionsAndBuildSegments(
+				results, speakerNames, wavSamples, wavSampleRate,
+				sherpaClient, cfg.Threads, inputPath,
+			)
 			if err != nil {
-				return fmt.Errorf("ensure emotion model: %w", err)
-			}
-			classifier, err := emotion.NewClassifier(sherpaClient, emotionModelDir, cfg.Threads)
-			if err != nil {
-				return fmt.Errorf("init emotion classifier: %w", err)
-			}
-			defer classifier.Close()
-
-			segments := make([]types.TranscriptSegment, 0, len(results))
-			for i, r := range results {
-				segAudio := audio.ExtractSegment(wavSamples, wavSampleRate, r.Start, r.End)
-
-				emotionInfo := types.EmotionInfo{Label: "Neutral", Display: ""}
-				audioEvent := "Speech"
-				var emotionConf float32
-				if len(segAudio) > 0 {
-					emotionResult, event, classErr := classifier.Classify(segAudio, wavSampleRate)
-					if classErr == nil {
-						emotionInfo = types.EmotionInfo{
-							Raw:     emotionResult.Raw,
-							Label:   emotionResult.Label,
-							Display: emotionResult.Display,
-						}
-						audioEvent = event
-						emotionConf = emotionResult.Confidence
-					}
-				}
-
-				segments = append(segments, types.TranscriptSegment{
-					Start:      r.Start,
-					End:        r.End,
-					Speaker:    speakerNames[i],
-					Emotion:    emotionInfo,
-					AudioEvent: audioEvent,
-					Language:   r.Language,
-					Text:       r.Text,
-					Confidence: types.Confidence{Speaker: 0, Emotion: emotionConf},
-				})
+				return err
 			}
 
-			// 14. Build metadata with speaker counts
-			speakerSet := make(map[string]bool)
-			identified := 0
-			for _, seg := range segments {
-				speakerSet[seg.Speaker] = true
-				if !strings.HasPrefix(seg.Speaker, "speaker_") && seg.Speaker != "Unknown" {
-					identified++
-				}
-			}
-
-			// Calculate duration from last result's End time
-			var duration float64
-			if len(results) > 0 {
-				duration = results[len(results)-1].End
-			}
-
-			transcript := types.TranscriptResult{
-				Metadata: types.Metadata{
-					File:               filepath.Base(inputPath),
-					Duration:           time.Duration(duration * float64(time.Second)).String(),
-					SpeakersDetected:   len(speakerSet),
-					SpeakersIdentified: identified,
-					Date:               time.Now().Format(time.RFC3339),
-				},
-				Segments: segments,
-			}
-
-			// 15. Format and write output files
+			// 14. Format and write output files
 			fmt.Fprintf(os.Stderr, "[9/9] Writing output files...\n")
-			formats := config.ParseFormats(format)
-			for _, fmt_ := range formats {
-				outPath := resolveOutputPath(inputPath, outputPath, fmt_)
-				content, err := formatTranscript(fmt_, transcript, punctFunc)
-				if err != nil {
-					return fmt.Errorf("format %s: %w", fmt_, err)
-				}
-				// Add UTF-8 BOM for txt/srt so macOS text editors detect encoding correctly
-				var fileContent []byte
-				if fmt_ == "txt" || fmt_ == "srt" {
-					fileContent = append([]byte{0xEF, 0xBB, 0xBF}, []byte(content)...)
-				} else {
-					fileContent = []byte(content)
-				}
-				if err := os.WriteFile(outPath, fileContent, 0644); err != nil {
-					return fmt.Errorf("write %s: %w", outPath, err)
-				}
-				fmt.Fprintf(os.Stderr, "Written: %s\n", outPath)
+			if err := writeTranscriptOutputs(transcript, format, inputPath, outputPath, punctFunc); err != nil {
+				return err
 			}
 
 			// Save current settings to config.yaml for next run
