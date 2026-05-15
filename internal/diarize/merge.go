@@ -16,7 +16,15 @@ import (
 	"github.com/kouko/meeting-emo-transcriber/internal/types"
 )
 
-// AssignSpeakers maps each ASR result to a diarization speaker by maximum time overlap.
+// AssignSpeakers attaches a diarization cluster ID to each ASR segment by
+// picking the cluster with the most time overlap on that segment's
+// [Start, End) range. Returns "" when an ASR segment has no overlap with
+// any diarization segment, which the downstream resolver treats as
+// "Unknown".
+//
+// Tie-breaking is "first cluster wins" (stable-ish — depends on the
+// order of diarSegments). For meeting recordings this is rare in
+// practice because diarSegments are typically non-overlapping.
 func AssignSpeakers(asrResults []types.ASRResult, diarSegments []Segment) []string {
 	ids := make([]string, len(asrResults))
 	for i, asr := range asrResults {

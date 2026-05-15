@@ -11,7 +11,12 @@ import (
 	"strconv"
 )
 
-// Segment represents a speaker diarization result.
+// Segment is one contiguous span of audio attributed by diarization to a
+// single cluster ID (Speaker). Cluster IDs are stable within a single
+// metr-diarize invocation but are NOT enrolled-speaker names — the
+// resolver in merge.go is what maps them to names. QualityScore is the
+// model's own confidence (0-1); the field is optional because older
+// metr-diarize builds did not emit it.
 type Segment struct {
 	Start        float64 `json:"start"`
 	End          float64 `json:"end"`
@@ -19,15 +24,22 @@ type Segment struct {
 	QualityScore float64 `json:"quality_score,omitempty"`
 }
 
-// DiarizeResult contains diarization segments and per-speaker voiceprints.
+// DiarizeResult is the parsed JSON output of metr-diarize. Segments is
+// time-ordered. SpeakerVoiceprints holds one centroid vector per cluster
+// ID (computed by metr-diarize from all segments in that cluster), which
+// the matcher uses to compare clusters against enrolled profiles.
 type DiarizeResult struct {
 	Segments           []Segment            `json:"segments"`
 	Speakers           int                  `json:"speakers"`
 	SpeakerVoiceprints map[string][]float64 `json:"speaker_voiceprints"`
 }
 
-// Process runs speaker diarization on a WAV file using metr-diarize CLI.
-// Returns diarization result including segments and per-speaker centroid embeddings.
+// Process shells out to the metr-diarize Swift CLI to diarize wavPath.
+// threshold controls clustering aggressiveness (higher → more speakers);
+// numSpeakers > 0 hints the model with an exact count and disables
+// auto-detection. The metr-diarize binary itself runs FluidAudio's
+// pyannote-segmentation + WeSpeaker + VBx pipeline under the hood and
+// returns a single JSON document on stdout.
 func Process(binPath, wavPath string, threshold float32, numSpeakers int) (*DiarizeResult, error) {
 	args := []string{wavPath, "--threshold", strconv.FormatFloat(float64(threshold), 'f', 2, 32)}
 	if numSpeakers > 0 {
@@ -51,7 +63,11 @@ func Process(binPath, wavPath string, threshold float32, numSpeakers int) (*Diar
 	return &result, nil
 }
 
-// VoiceprintResult is the JSON output from metr-diarize --extract-voiceprints.
+// VoiceprintResult is one entry in metr-diarize's --extract-voiceprints
+// output. The Vector is L2-normalised by the underlying WeSpeaker model;
+// Model is a string tag (e.g. "fluidaudio_embedding_v1") that callers
+// can use to detect when stored vectors were produced by an older
+// model and should be invalidated.
 type VoiceprintResult struct {
 	File   string    `json:"file"`
 	Vector []float64 `json:"vector"`
@@ -59,7 +75,9 @@ type VoiceprintResult struct {
 	Model  string    `json:"model"`
 }
 
-// ExtractVoiceprint runs metr-diarize in voiceprint extraction mode for a single file.
+// ExtractVoiceprint is the single-file convenience wrapper around
+// ExtractVoiceprints. Prefer the batch variant when extracting more than
+// one file in a row — model load dominates per-call latency.
 func ExtractVoiceprint(binPath, wavPath string) (*VoiceprintResult, error) {
 	results, err := ExtractVoiceprints(binPath, []string{wavPath})
 	if err != nil {
@@ -71,8 +89,11 @@ func ExtractVoiceprint(binPath, wavPath string) (*VoiceprintResult, error) {
 	return &results[0], nil
 }
 
-// ExtractVoiceprints runs metr-diarize in batch voiceprint extraction mode.
-// Loads the model once for all files. Much faster than calling ExtractVoiceprint per file.
+// ExtractVoiceprints runs metr-diarize once with --extract-voiceprints
+// and a batch of wav paths. The model is loaded a single time and reused
+// across every input, so callers paying repeated startup cost via
+// ExtractVoiceprint (~hundreds of ms each on first-load) should batch
+// through here whenever they have more than one file to process.
 func ExtractVoiceprints(binPath string, wavPaths []string) ([]VoiceprintResult, error) {
 	args := append([]string{"--extract-voiceprints"}, wavPaths...)
 	cmd := exec.Command(binPath, args...)
