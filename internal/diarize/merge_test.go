@@ -128,6 +128,7 @@ func TestResolveSpeakerNames_ShortSegmentsMarkedUnknown(t *testing.T) {
 		0.55, 0.07, store, "", false,
 		15.0, // minSampleDuration
 		0.01, // minSampleRMS
+		true, // discover
 	)
 	if err != nil {
 		t.Fatalf("ResolveSpeakerNames: %v", err)
@@ -172,6 +173,7 @@ func TestResolveSpeakerNames_ZeroThresholdAllowsAll(t *testing.T) {
 		[]types.SpeakerProfile{}, 0.55, 0.07, store, "", false,
 		0.0,  // minSampleDuration = 0 → allow all
 		0.01,
+		true, // discover
 	)
 	if err != nil {
 		t.Fatalf("ResolveSpeakerNames: %v", err)
@@ -180,5 +182,42 @@ func TestResolveSpeakerNames_ZeroThresholdAllowsAll(t *testing.T) {
 	// Even 3s segment should get speaker_1 when threshold is 0
 	if names[0] != "speaker_1" {
 		t.Errorf("names[0] = %q, want speaker_1 (minSampleDuration=0 allows all)", names[0])
+	}
+}
+
+func TestResolveSpeakerNames_NoDiscover_DoesNotCreateSpeakerN(t *testing.T) {
+	dir := t.TempDir()
+	store := speaker.NewStore(dir, config.SupportedAudioExtensions())
+	sampleRate := 16000
+
+	// 30 seconds of audio so the cluster easily clears minSampleDuration.
+	wavSamples := generateSineWAV(sampleRate, 30.0, 0.5)
+
+	diarResult := &DiarizeResult{
+		Segments: []Segment{
+			{Start: 0, End: 20, Speaker: "C1"},
+		},
+		SpeakerVoiceprints: map[string][]float64{},
+	}
+	speakerIDs := []string{"C1"}
+
+	// Discover OFF — the 20s unmatched cluster MUST fall through to
+	// "Unknown" instead of being persisted as speaker_N.
+	names, err := ResolveSpeakerNames(
+		speakerIDs, diarResult, wavSamples, sampleRate,
+		[]types.SpeakerProfile{},
+		0.55, 0.07, store, "", false,
+		15.0, 0.01,
+		false, // discover
+	)
+	if err != nil {
+		t.Fatalf("ResolveSpeakerNames: %v", err)
+	}
+
+	if names[0] != "Unknown" {
+		t.Errorf("names[0] = %q, want Unknown when discover=false", names[0])
+	}
+	if _, err := os.Stat(filepath.Join(dir, "speaker_1")); err == nil {
+		t.Error("speaker_1 directory MUST NOT exist when discover=false")
 	}
 }

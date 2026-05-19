@@ -85,7 +85,14 @@ type matchResultInfo struct {
 //
 // Clusters that are unmatched, below threshold, ambiguous, or lose their
 // best-name to a stronger competitor fall back to "Unknown" (when their
-// longest segment is too short) or a fresh "speaker_N" profile.
+// longest segment is too short, OR when discover is false) or a fresh
+// "speaker_N" profile.
+//
+// discover controls whether qualifying unmatched clusters are persisted as
+// new "speaker_N" entries in the store. When false, those clusters are
+// labelled "Unknown" instead and no new folder is created — useful for
+// dry-runs against an already-curated speaker set, or for users who never
+// want auto-discovery.
 func ResolveSpeakerNames(
 	speakerIDs []string,
 	diarResult *DiarizeResult,
@@ -99,6 +106,7 @@ func ResolveSpeakerNames(
 	learn bool,
 	minSampleDuration float64,
 	minSampleRMS float64,
+	discover bool,
 ) ([]string, error) {
 	// Log enrolled profiles
 	if len(profiles) > 0 {
@@ -230,11 +238,15 @@ func ResolveSpeakerNames(
 		}
 
 		maxDur := maxSegmentDuration(diarResult.Segments, clusterID)
-		if maxDur < minSampleDuration {
+		switch {
+		case maxDur < minSampleDuration:
 			clusterNames[clusterID] = "Unknown"
 			fmt.Fprintf(os.Stderr, "    → %s; longest segment %.1fs < min %.1fs, marked as Unknown\n",
 				reason, maxDur, minSampleDuration)
-		} else {
+		case !discover:
+			clusterNames[clusterID] = "Unknown"
+			fmt.Fprintf(os.Stderr, "    → %s; discover disabled, marked as Unknown\n", reason)
+		default:
 			name := fmt.Sprintf("speaker_%d", nextUnknownID)
 			nextUnknownID++
 			clusterNames[clusterID] = name

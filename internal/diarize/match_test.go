@@ -165,6 +165,7 @@ func TestResolveSpeakerNames_SingleClusterMatchesProfile(t *testing.T) {
 		[]string{"C1"}, diarResult, wavSamples, sampleRate,
 		profiles, 0.55, 0.07, store, "", false,
 		15.0, 0.01,
+		true, // discover
 	)
 	if err != nil {
 		t.Fatalf("ResolveSpeakerNames: %v", err)
@@ -195,6 +196,7 @@ func TestResolveSpeakerNames_BelowThresholdCreatesNewSpeaker(t *testing.T) {
 		[]string{"C1"}, diarResult, wavSamples, sampleRate,
 		profiles, 0.55, 0.07, store, "", false,
 		15.0, 0.01,
+		true, // discover
 	)
 	if err != nil {
 		t.Fatalf("ResolveSpeakerNames: %v", err)
@@ -236,6 +238,7 @@ func TestResolveSpeakerNames_TwoClustersBothMatchAlice_OnlyHighestWinsName(t *te
 		[]string{"C1", "C2"}, diarResult, wavSamples, sampleRate,
 		profiles, 0.55, 0.07, store, "", false,
 		15.0, 0.01,
+		true, // discover
 	)
 	if err != nil {
 		t.Fatalf("ResolveSpeakerNames: %v", err)
@@ -279,6 +282,7 @@ func TestResolveSpeakerNames_AmbiguousMatch_RejectedByMargin(t *testing.T) {
 		[]string{"C1"}, diarResult, wavSamples, sampleRate,
 		profiles, 0.55, 0.07, store, "", false,
 		15.0, 0.01,
+		true, // discover
 	)
 	if err != nil {
 		t.Fatalf("ResolveSpeakerNames: %v", err)
@@ -311,6 +315,7 @@ func TestResolveSpeakerNames_LearnMode_WritesToReviewSubdir(t *testing.T) {
 		[]string{"C1"}, diarResult, wavSamples, sampleRate,
 		profiles, 0.55, 0.07, store, "", true, // learn=true
 		15.0, 0.01,
+		true, // discover
 	)
 	if err != nil {
 		t.Fatalf("ResolveSpeakerNames: %v", err)
@@ -379,6 +384,7 @@ func TestResolveSpeakerNames_MarginZero_AcceptsAmbiguous(t *testing.T) {
 		[]string{"C1"}, diarResult, wavSamples, sampleRate,
 		profiles, 0.55, 0.0, store, "", false,
 		15.0, 0.01,
+		true, // discover
 	)
 	if err != nil {
 		t.Fatalf("ResolveSpeakerNames: %v", err)
@@ -413,6 +419,7 @@ func TestResolveSpeakerNames_ExplicitThreshold055_AcceptsBorderlineMatch(t *test
 		[]string{"C1"}, diarResult, wavSamples, sampleRate,
 		profiles, 0.55, 0.07, store, "", false,
 		15.0, 0.01,
+		true, // discover
 	)
 	if err != nil {
 		t.Fatalf("ResolveSpeakerNames: %v", err)
@@ -445,6 +452,7 @@ func TestResolveSpeakerNames_DefaultThreshold065_RejectsBorderline(t *testing.T)
 		[]string{"C1"}, diarResult, wavSamples, sampleRate,
 		profiles, 0.65, 0.07, store, "", false,
 		15.0, 0.01,
+		true, // discover
 	)
 	if err != nil {
 		t.Fatalf("ResolveSpeakerNames: %v", err)
