@@ -83,6 +83,7 @@ c.wav → 模型 → 聲紋 C → L2 normalize  ⎬→ 算平均 → 再 L2 norm
 | `metr speakers inspect <name>` | **重要**：診斷某位 enrolled 人物的聲紋品質——印出每個音檔對代表聲紋的 cosine、跟其他人的最高相似度、安全 margin |
 | `metr speakers verify --name X --audio f.wav` | 拿一段測試音檔比對 enrolled 人物 X |
 | `metr <audio> --dry-run` | **快速調參**：只跑分群+認人，不跑 ASR/情緒/輸出。改 threshold/margin 立刻看結果 |
+| `metr <audio> --no-discover` | 不要為未匹配的 cluster 自動建立 `speaker_N` 資料夾（cluster 仍會被標 `Unknown`，只是不入庫）。等同於在 `<speakers>/_metr/config.yaml` 設 `discover: false` |
 
 ## 調參建議
 

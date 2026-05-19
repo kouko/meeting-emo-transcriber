@@ -32,6 +32,7 @@ func newTranscribeCmd() *cobra.Command {
 		matchMargin               float32
 		numSpeakers               int
 		dryRun                    bool
+		noDiscover                bool
 		learn                     bool
 		enhance                   bool
 		normalize                 bool
@@ -86,6 +87,9 @@ Examples:
 			}
 			if cmd.Flags().Changed("min-sample-rms") {
 				cfg.MinSampleRMS = minSampleRMS
+			}
+			if cmd.Flags().Changed("no-discover") && noDiscover {
+				cfg.Discover = false
 			}
 			if cmd.Flags().Changed("verify-segments") {
 				cfg.VerifySegments = verifySegments
@@ -407,6 +411,7 @@ Examples:
 	cmd.Flags().Float32Var(&matchThreshold, "match-threshold", 0.65, "speaker matching threshold for enrolled profiles")
 	cmd.Flags().Float32Var(&matchMargin, "match-margin", 0.07, "minimum cosine gap between best and runner-up profile to accept a match")
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "skip ASR/emotion/output — only run diarize + speaker matching (fast threshold tuning)")
+	cmd.Flags().BoolVar(&noDiscover, "no-discover", false, "do not auto-create speaker_N folders for unmatched clusters (otherwise on by default; can also be set via _metr/config.yaml discover: false)")
 	cmd.Flags().BoolVar(&verifySegments, "verify-segments", false, "re-verify each ASR segment against its matched profile and demote stray segments to Unknown")
 	cmd.Flags().Float32Var(&verifySegmentsThreshold, "verify-threshold", 0.50, "per-segment verification threshold (looser than --match-threshold)")
 	cmd.Flags().Float64Var(&verifySegmentsMinDuration, "verify-min-duration", 1.0, "minimum segment duration (seconds) to re-verify")
