@@ -145,6 +145,13 @@ a speaker, then reports:
   - A "safety margin" = intra-min minus inter-max. Positive ≈ this
     speaker is well separated from everyone else in the set.
 
+Note: intra-class and safety margin are computed against the single
+"merged" voiceprint stored in the profile. The live matcher used during
+transcribe scores each cluster against every stored voiceprint and
+keeps the max (BestSimilarity), so it is meaningfully more forgiving
+than the worst-case margin reported here. A negative margin is a
+warning, not a guarantee of misidentification.
+
 Useful for tuning --match-threshold and --match-margin without running
 a full transcribe.`,
 		Args: cobra.ExactArgs(1),
@@ -278,8 +285,9 @@ a full transcribe.`,
 				fmt.Println()
 				fmt.Printf("Safety margin: %.2f (intra-min %.2f − strongest impostor %.2f)\n",
 					report.SafetyMargin, report.IntraMin, report.Inter[0].MaxSim)
+				fmt.Printf("  (computed vs the merged voiceprint only; live matcher uses max over all stored voiceprints and is more forgiving)\n")
 				if report.SafetyMargin < 0 {
-					fmt.Printf("  ⚠ negative margin — at least one other speaker scores higher than your worst sample\n")
+					fmt.Printf("  ⚠ negative margin against the merged voiceprint — at least one other speaker's stored voiceprint scores higher than this speaker's worst sample\n")
 				} else if report.SafetyMargin < 0.1 {
 					fmt.Printf("  ⚠ tight margin — consider raising --match-threshold or adding more enrollment audio\n")
 				}
