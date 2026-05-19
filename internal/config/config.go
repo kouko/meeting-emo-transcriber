@@ -148,6 +148,37 @@ func Load(configPath, speakersDir string) (Config, error) {
 	return cfg, nil
 }
 
+// LegacyConfigWarnings inspects the yaml at <speakersDir>/_metr/config.yaml
+// (or the backward-compat <speakersDir>/config.yaml) and returns user-facing
+// warnings when the file predates the speaker-matching overhaul. The trigger
+// is: file sets match_threshold but is missing match_margin — the
+// unmistakable signature of a yaml authored before the overhaul shipped.
+// Returns nil when no file exists or the file is current.
+func LegacyConfigWarnings(speakersDir string) []string {
+	if speakersDir == "" {
+		return nil
+	}
+	v := viper.New()
+	v.SetConfigName("config")
+	v.SetConfigType("yaml")
+	v.AddConfigPath(filepath.Join(speakersDir, "_metr"))
+	v.AddConfigPath(speakersDir)
+	if err := v.ReadInConfig(); err != nil {
+		return nil
+	}
+	hasThreshold := v.IsSet("match_threshold")
+	hasMargin := v.IsSet("match_margin")
+	if !hasThreshold || hasMargin {
+		return nil
+	}
+	threshold := v.GetFloat64("match_threshold")
+	msg := fmt.Sprintf(
+		"_metr/config.yaml pins match_threshold=%.2f without match_margin — this yaml predates the matching overhaul. New recommended defaults: match_threshold: 0.65 / match_margin: 0.07. Edit the yaml or pass --match-threshold / --match-margin to override.",
+		threshold,
+	)
+	return []string{msg}
+}
+
 // SaveableConfig holds user-facing settings to write to config.yaml.
 type SaveableConfig struct {
 	Language       string   `yaml:"language"`

@@ -270,6 +270,59 @@ func TestSupportedAudioExtensions(t *testing.T) {
 	}
 }
 
+func TestLegacyConfigWarnings_NoFile(t *testing.T) {
+	dir := t.TempDir()
+	warns := LegacyConfigWarnings(dir)
+	if len(warns) != 0 {
+		t.Errorf("no yaml → want 0 warnings, got %d: %v", len(warns), warns)
+	}
+}
+
+func TestLegacyConfigWarnings_PreOverhaulYAML(t *testing.T) {
+	dir := t.TempDir()
+	metrDir := filepath.Join(dir, "_metr")
+	os.MkdirAll(metrDir, 0755)
+	// Legacy yaml: has match_threshold but not match_margin
+	yaml := "language: zh-TW\nthreshold: 0.80\nmatch_threshold: 0.55\nformat: txt\n"
+	os.WriteFile(filepath.Join(metrDir, "config.yaml"), []byte(yaml), 0644)
+
+	warns := LegacyConfigWarnings(dir)
+	if len(warns) == 0 {
+		t.Fatal("legacy yaml → want >=1 warning, got 0")
+	}
+	joined := strings.Join(warns, "\n")
+	if !strings.Contains(joined, "match_margin") {
+		t.Errorf("warning should mention match_margin: %v", warns)
+	}
+}
+
+func TestLegacyConfigWarnings_CurrentYAML(t *testing.T) {
+	dir := t.TempDir()
+	metrDir := filepath.Join(dir, "_metr")
+	os.MkdirAll(metrDir, 0755)
+	yaml := "language: zh-TW\nthreshold: 0.80\nmatch_threshold: 0.65\nmatch_margin: 0.07\nformat: txt\n"
+	os.WriteFile(filepath.Join(metrDir, "config.yaml"), []byte(yaml), 0644)
+
+	warns := LegacyConfigWarnings(dir)
+	if len(warns) != 0 {
+		t.Errorf("current yaml → want 0 warnings, got %d: %v", len(warns), warns)
+	}
+}
+
+func TestLegacyConfigWarnings_OnlyThreshold(t *testing.T) {
+	// yaml has only matching-unrelated keys → not a "matching" yaml, no warning.
+	dir := t.TempDir()
+	metrDir := filepath.Join(dir, "_metr")
+	os.MkdirAll(metrDir, 0755)
+	yaml := "language: zh-TW\nthreshold: 0.80\nformat: txt\n"
+	os.WriteFile(filepath.Join(metrDir, "config.yaml"), []byte(yaml), 0644)
+
+	warns := LegacyConfigWarnings(dir)
+	if len(warns) != 0 {
+		t.Errorf("non-matching yaml → want 0 warnings, got %d: %v", len(warns), warns)
+	}
+}
+
 func TestParseFormats(t *testing.T) {
 	tests := []struct {
 		input string

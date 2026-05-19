@@ -57,12 +57,18 @@ Examples:
   metr transcribe --input meeting.mp3 --enhance --normalize
   metr transcribe --input meeting.mp3 -L`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			// 1. Validate input file exists
+			// 1. Surface legacy-config warnings up-front so they appear even when
+			// validation below fails (e.g. user runs `metr transcribe --help`-then-typo).
+			for _, w := range config.LegacyConfigWarnings(speakersDir) {
+				fmt.Fprintf(os.Stderr, "warning: %s\n", w)
+			}
+
+			// 2. Validate input file exists
 			if _, err := os.Stat(inputPath); err != nil {
 				return fmt.Errorf("input file not found: %w", err)
 			}
 
-			// 2. Load config, then overlay only explicitly-set CLI flags
+			// 3. Load config, then overlay only explicitly-set CLI flags
 			cfg, err := config.Load(configPath, speakersDir)
 			if err != nil {
 				return fmt.Errorf("load config: %w", err)
