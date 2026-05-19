@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/kouko/meeting-emo-transcriber/internal/audio"
 	"github.com/kouko/meeting-emo-transcriber/internal/types"
 )
 
@@ -282,6 +283,29 @@ func (s *Store) ListAudioFiles(speaker string) ([]string, error) {
 		}
 	}
 	return files, nil
+}
+
+// TotalAudioDuration returns the summed playback duration of all WAV files
+// enrolled for a speaker. Non-WAV files and files that fail to decode are
+// silently skipped — the result is a best-effort lower bound used to flag
+// sub-quality enrollments (< EnrollMinDurationSec).
+func (s *Store) TotalAudioDuration(speaker string) (float64, error) {
+	files, err := s.ListAudioFiles(speaker)
+	if err != nil {
+		return 0, err
+	}
+	var total float64
+	for _, path := range files {
+		if strings.ToLower(filepath.Ext(path)) != ".wav" {
+			continue
+		}
+		samples, rate, err := audio.ReadWAV(path)
+		if err != nil || rate == 0 {
+			continue
+		}
+		total += float64(len(samples)) / float64(rate)
+	}
+	return total, nil
 }
 
 // FindNewAudioFiles returns audio files whose hash is NOT in any profile's known_audio_hashes.

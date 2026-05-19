@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/kouko/meeting-emo-transcriber/internal/audio"
 	"github.com/kouko/meeting-emo-transcriber/internal/types"
 )
 
@@ -282,5 +283,69 @@ func TestStoreRoot(t *testing.T) {
 	store := NewStore(dir, []string{".wav"})
 	if store.Root() != dir {
 		t.Errorf("Root() = %q, want %q", store.Root(), dir)
+	}
+}
+
+// writeSilentWAV creates a valid 16kHz mono WAV with the given duration.
+func writeSilentWAV(t *testing.T, path string, durationSec float64) {
+	t.Helper()
+	sampleRate := 16000
+	n := int(durationSec * float64(sampleRate))
+	samples := make([]float32, n)
+	if err := audio.WriteWAV(path, samples, sampleRate); err != nil {
+		t.Fatalf("WriteWAV: %v", err)
+	}
+}
+
+func TestStore_TotalAudioDuration_Sums(t *testing.T) {
+	dir := t.TempDir()
+	speakerDir := filepath.Join(dir, "Alice")
+	os.MkdirAll(speakerDir, 0755)
+	writeSilentWAV(t, filepath.Join(speakerDir, "a.wav"), 2.0)
+	writeSilentWAV(t, filepath.Join(speakerDir, "b.wav"), 4.0)
+	writeSilentWAV(t, filepath.Join(speakerDir, "c.wav"), 6.0)
+
+	store := NewStore(dir, supportedExtensions())
+	got, err := store.TotalAudioDuration("Alice")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := 12.0
+	if got < want-0.05 || got > want+0.05 {
+		t.Errorf("TotalAudioDuration = %.3f, want ~%.3f", got, want)
+	}
+}
+
+func TestStore_TotalAudioDuration_NoFiles(t *testing.T) {
+	dir := t.TempDir()
+	speakerDir := filepath.Join(dir, "Alice")
+	os.MkdirAll(speakerDir, 0755)
+
+	store := NewStore(dir, supportedExtensions())
+	got, err := store.TotalAudioDuration("Alice")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != 0 {
+		t.Errorf("TotalAudioDuration empty = %.3f, want 0", got)
+	}
+}
+
+func TestStore_TotalAudioDuration_SkipsUnreadable(t *testing.T) {
+	dir := t.TempDir()
+	speakerDir := filepath.Join(dir, "Alice")
+	os.MkdirAll(speakerDir, 0755)
+	writeSilentWAV(t, filepath.Join(speakerDir, "good.wav"), 3.0)
+	// Corrupt file with .wav extension — must be skipped silently
+	os.WriteFile(filepath.Join(speakerDir, "bad.wav"), []byte("not a wav"), 0644)
+
+	store := NewStore(dir, supportedExtensions())
+	got, err := store.TotalAudioDuration("Alice")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := 3.0
+	if got < want-0.05 || got > want+0.05 {
+		t.Errorf("TotalAudioDuration with bad file = %.3f, want ~%.3f", got, want)
 	}
 }

@@ -51,7 +51,12 @@ func newSpeakersListCmd() *cobra.Command {
 						status = fmt.Sprintf("enrolled, %d voiceprints", len(profile.Voiceprints))
 					}
 				}
-				fmt.Printf("  %s: %d audio files (%s)\n", name, len(files), status)
+				totalDur, _ := store.TotalAudioDuration(name)
+				warning := ""
+				if totalDur > 0 && totalDur < speaker.EnrollMinDurationSec {
+					warning = fmt.Sprintf("  ⚠ enrollment %.1fs < %.0fs minimum (re-enroll will be refused)", totalDur, speaker.EnrollMinDurationSec)
+				}
+				fmt.Printf("  %s: %d audio files (%s)%s\n", name, len(files), status, warning)
 			}
 			return nil
 		},
