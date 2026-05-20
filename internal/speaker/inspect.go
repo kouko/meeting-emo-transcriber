@@ -78,117 +78,14 @@ func ComputeInspection(
 	otherProfiles []types.SpeakerProfile,
 ) InspectionReport {
 	report := InspectionReport{SpeakerName: speakerName}
-
 	merged := MergedVoiceprint(&targetProfile)
-	hasVoiceprints := len(targetProfile.Voiceprints) > 0
 
-	// Intra (merged-only): every sample's embedding vs the merged centroid.
-	if len(merged) > 0 && len(fileEmbeddings) > 0 {
-		report.IntraSims = make([]float32, 0, len(fileEmbeddings))
-		var sum float32
-		report.IntraMin = 2
-		report.IntraMax = -2
-		for _, emb := range fileEmbeddings {
-			if len(emb) == 0 {
-				continue
-			}
-			sim := CosineSimilarity(emb, merged)
-			report.IntraSims = append(report.IntraSims, sim)
-			sum += sim
-			if sim < report.IntraMin {
-				report.IntraMin = sim
-			}
-			if sim > report.IntraMax {
-				report.IntraMax = sim
-			}
-		}
-		if n := len(report.IntraSims); n > 0 {
-			report.IntraMean = sum / float32(n)
-		} else {
-			report.IntraMin = 0
-			report.IntraMax = 0
-		}
-	}
-
-	// Intra (best-of-all): every sample's embedding vs the BEST matching
-	// voiceprint in the target profile. Mirrors live matcher scoring.
-	if hasVoiceprints && len(fileEmbeddings) > 0 {
-		report.BestOfAllIntraSims = make([]float32, 0, len(fileEmbeddings))
-		var sum float32
-		report.BestOfAllIntraMin = 2
-		report.BestOfAllIntraMax = -2
-		for _, emb := range fileEmbeddings {
-			if len(emb) == 0 {
-				continue
-			}
-			sim := BestSimilarity(emb, targetProfile)
-			if sim == -1 {
-				continue
-			}
-			report.BestOfAllIntraSims = append(report.BestOfAllIntraSims, sim)
-			sum += sim
-			if sim < report.BestOfAllIntraMin {
-				report.BestOfAllIntraMin = sim
-			}
-			if sim > report.BestOfAllIntraMax {
-				report.BestOfAllIntraMax = sim
-			}
-		}
-		if n := len(report.BestOfAllIntraSims); n > 0 {
-			report.BestOfAllIntraMean = sum / float32(n)
-		} else {
-			report.BestOfAllIntraMin = 0
-			report.BestOfAllIntraMax = 0
-		}
-	}
-
-	// Inter: merged voiceprint vs every other profile via BestSimilarity.
-	if len(merged) > 0 {
-		for _, other := range otherProfiles {
-			if other.Name == speakerName {
-				continue
-			}
-			sim := BestSimilarity(merged, other)
-			if sim == -1 {
-				continue
-			}
-			report.Inter = append(report.Inter, InterScore{
-				OtherName: other.Name,
-				MaxSim:    sim,
-			})
-		}
-		sort.Slice(report.Inter, func(i, j int) bool {
-			return report.Inter[i].MaxSim > report.Inter[j].MaxSim
-		})
-	}
-
-	// BestOfAllInterMax: walk every per-file embedding against every
-	// other profile via BestSimilarity, take the max. This is the
-	// realistic worst case the live matcher will see when an utterance
-	// from this speaker could be misclassified into another profile.
-	report.BestOfAllInterMax = -2
-	if len(fileEmbeddings) > 0 {
-		for _, emb := range fileEmbeddings {
-			if len(emb) == 0 {
-				continue
-			}
-			for _, other := range otherProfiles {
-				if other.Name == speakerName {
-					continue
-				}
-				sim := BestSimilarity(emb, other)
-				if sim == -1 {
-					continue
-				}
-				if sim > report.BestOfAllInterMax {
-					report.BestOfAllInterMax = sim
-				}
-			}
-		}
-	}
-	if report.BestOfAllInterMax < -1 {
-		report.BestOfAllInterMax = 0
-	}
+	report.IntraSims, report.IntraMean, report.IntraMin, report.IntraMax =
+		computeMergedIntra(fileEmbeddings, merged)
+	report.BestOfAllIntraSims, report.BestOfAllIntraMean, report.BestOfAllIntraMin, report.BestOfAllIntraMax =
+		computeBestOfAllIntra(fileEmbeddings, targetProfile)
+	report.Inter = computeInterMergedSorted(speakerName, merged, otherProfiles)
+	report.BestOfAllInterMax = computeBestOfAllInterMax(speakerName, fileEmbeddings, otherProfiles)
 
 	if len(report.Inter) > 0 && len(report.IntraSims) > 0 {
 		report.SafetyMargin = report.IntraMin - report.Inter[0].MaxSim
@@ -196,8 +93,118 @@ func ComputeInspection(
 	if len(report.BestOfAllIntraSims) > 0 && len(otherProfiles) > 0 {
 		report.BestOfAllSafetyMargin = report.BestOfAllIntraMin - report.BestOfAllInterMax
 	}
-
 	return report
+}
+
+// computeMergedIntra returns per-file cosine vs the merged voiceprint,
+// plus aggregate mean/min/max. Skips empty embeddings.
+func computeMergedIntra(fileEmbeddings [][]float32, merged []float32) ([]float32, float32, float32, float32) {
+	if len(merged) == 0 || len(fileEmbeddings) == 0 {
+		return nil, 0, 0, 0
+	}
+	sims := make([]float32, 0, len(fileEmbeddings))
+	var sum, min, max float32 = 0, 2, -2
+	for _, emb := range fileEmbeddings {
+		if len(emb) == 0 {
+			continue
+		}
+		sim := CosineSimilarity(emb, merged)
+		sims = append(sims, sim)
+		sum += sim
+		if sim < min {
+			min = sim
+		}
+		if sim > max {
+			max = sim
+		}
+	}
+	if len(sims) == 0 {
+		return sims, 0, 0, 0
+	}
+	return sims, sum / float32(len(sims)), min, max
+}
+
+// computeBestOfAllIntra returns per-file cosine vs the BEST matching
+// voiceprint in the target profile (BestSimilarity), plus aggregates.
+// Mirrors live matcher scoring.
+func computeBestOfAllIntra(fileEmbeddings [][]float32, targetProfile types.SpeakerProfile) ([]float32, float32, float32, float32) {
+	if len(targetProfile.Voiceprints) == 0 || len(fileEmbeddings) == 0 {
+		return nil, 0, 0, 0
+	}
+	sims := make([]float32, 0, len(fileEmbeddings))
+	var sum, min, max float32 = 0, 2, -2
+	for _, emb := range fileEmbeddings {
+		if len(emb) == 0 {
+			continue
+		}
+		sim := BestSimilarity(emb, targetProfile)
+		if sim == -1 {
+			continue
+		}
+		sims = append(sims, sim)
+		sum += sim
+		if sim < min {
+			min = sim
+		}
+		if sim > max {
+			max = sim
+		}
+	}
+	if len(sims) == 0 {
+		return sims, 0, 0, 0
+	}
+	return sims, sum / float32(len(sims)), min, max
+}
+
+// computeInterMergedSorted returns inter-class scores (merged voiceprint
+// vs every other profile via BestSimilarity), sorted descending by sim.
+func computeInterMergedSorted(speakerName string, merged []float32, otherProfiles []types.SpeakerProfile) []InterScore {
+	if len(merged) == 0 {
+		return nil
+	}
+	var out []InterScore
+	for _, other := range otherProfiles {
+		if other.Name == speakerName {
+			continue
+		}
+		sim := BestSimilarity(merged, other)
+		if sim == -1 {
+			continue
+		}
+		out = append(out, InterScore{OtherName: other.Name, MaxSim: sim})
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].MaxSim > out[j].MaxSim })
+	return out
+}
+
+// computeBestOfAllInterMax returns the largest cosine any per-file
+// embedding scores against any other profile via BestSimilarity. This
+// is the realistic worst case the live matcher will see when an
+// utterance from this speaker could be misclassified into another
+// profile. Returns 0 when nothing comparable is found.
+func computeBestOfAllInterMax(speakerName string, fileEmbeddings [][]float32, otherProfiles []types.SpeakerProfile) float32 {
+	var max float32 = -2
+	for _, emb := range fileEmbeddings {
+		if len(emb) == 0 {
+			continue
+		}
+		for _, other := range otherProfiles {
+			if other.Name == speakerName {
+				continue
+			}
+			sim := BestSimilarity(emb, other)
+			if sim == -1 {
+				continue
+			}
+			if sim > max {
+				max = sim
+			}
+		}
+	}
+	if max < -1 {
+		return 0
+	}
+	return max
 }
 
 // MergedVoiceprint returns the first voiceprint of type "merged" in the

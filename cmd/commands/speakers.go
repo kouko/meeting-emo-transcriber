@@ -174,8 +174,7 @@ re-extract voiceprints under the current per-file averaging recipe.`,
 			}
 			targetProfile.Name = target
 
-			merged := speaker.MergedVoiceprint(targetProfile)
-			if merged == nil {
+			if speaker.MergedVoiceprint(targetProfile) == nil {
 				return fmt.Errorf("speaker %q has no merged voiceprint — run `metr enroll` first", target)
 			}
 
@@ -255,7 +254,6 @@ re-extract voiceprints under the current per-file averaging recipe.`,
 			}
 
 			report := speaker.ComputeInspection(target, embeddings, *targetProfile, otherProfiles)
-			_ = merged // retained above for the existence check; ComputeInspection now reads the full profile.
 
 			fmt.Printf("Inspecting speaker %q...\n\n", target)
 			fmt.Printf("Audio samples:\n")

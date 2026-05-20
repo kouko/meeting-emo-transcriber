@@ -63,8 +63,11 @@ func newEnrollCmd() *cobra.Command {
 					}
 					targets = []string{rebuildName}
 				}
-				fmt.Printf("Rebuilding %d speaker(s) in %s/ (existing profiles will be backed up to *.bak.<ts>.json)...\n",
-					len(targets), speakersDir)
+				fmt.Fprintln(os.Stderr, "  ⚠ --rebuild discards ALL stored voiceprints (centroids included) and re-extracts under the current per-file averaging recipe.")
+				fmt.Fprintln(os.Stderr, "    On profiles whose centroids were captured by past `transcribe` auto-discovery runs (not by the pre-overhaul concatenation recipe),")
+				fmt.Fprintln(os.Stderr, "    rebuild can REDUCE matching quality by losing per-recording diversity. Run `metr speakers inspect <name>` before and after")
+				fmt.Fprintln(os.Stderr, "    to compare best-of-all margins. Originals are backed up to *.bak.<ts>.json — you can roll back manually.")
+				fmt.Printf("Rebuilding %d speaker(s) in %s/...\n", len(targets), speakersDir)
 				var rebuilt, failed int
 				for _, name := range targets {
 					fmt.Fprintf(os.Stderr, "  Rebuilding %s...\n", name)
