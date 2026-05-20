@@ -74,6 +74,162 @@ func averageEmbeddings(embeddings [][]float32) []float32 {
 	return mean
 }
 
+// RebuildSpeaker re-extracts per-file voiceprints for one speaker and
+// replaces the entire on-disk profile with a single fresh "merged"
+// voiceprint computed via averageEmbeddings (the canonical recipe).
+//
+// Unlike AutoEnroll, RebuildSpeaker:
+//   - ignores KnownAudioHashes — every audio file is re-extracted;
+//   - discards all existing voiceprints (centroids included), not just
+//     the previous "merged" type;
+//   - takes a timestamped backup of any existing *.profile.json to
+//     <name>.bak.<RFC3339>.json before writing.
+//
+// This is the supported migration path for profiles whose stored
+// voiceprints were produced by the pre-overhaul concatenation recipe.
+// Returns an error when the speaker has no readable audio files.
+func RebuildSpeaker(store *Store, name string, ffmpegPath string, extractFn VoiceprintExtractFunc) error {
+	audioFiles, err := store.ListAudioFiles(name)
+	if err != nil {
+		return fmt.Errorf("list audio files for %s: %w", name, err)
+	}
+	if len(audioFiles) == 0 {
+		return fmt.Errorf("speaker %q has no audio samples; rebuild requires at least one file", name)
+	}
+
+	// Step 1: backup any existing profile files before mutating disk.
+	speakerDir := filepath.Join(store.Root(), name)
+	entries, err := os.ReadDir(speakerDir)
+	if err != nil {
+		return fmt.Errorf("read speaker dir %s: %w", name, err)
+	}
+	backupSuffix := time.Now().UTC().Format("20060102T150405Z")
+	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
+		fname := e.Name()
+		if !endsWithProfileJSON(fname) {
+			continue
+		}
+		src := filepath.Join(speakerDir, fname)
+		backupName := fname + ".bak." + backupSuffix + ".json"
+		dst := filepath.Join(speakerDir, backupName)
+		data, err := os.ReadFile(src)
+		if err != nil {
+			return fmt.Errorf("read existing profile %s: %w", fname, err)
+		}
+		if err := os.WriteFile(dst, data, 0644); err != nil {
+			return fmt.Errorf("write backup %s: %w", backupName, err)
+		}
+	}
+
+	// Step 2: convert each audio file to WAV and measure total duration.
+	tmpDir, err := os.MkdirTemp("", "met-rebuild-*")
+	if err != nil {
+		return fmt.Errorf("create temp dir: %w", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	type convertedWAV struct {
+		path     string
+		duration float64
+	}
+	converted := make([]convertedWAV, 0, len(audioFiles))
+	var totalDuration float64
+	for i, file := range audioFiles {
+		tempWav := filepath.Join(tmpDir, fmt.Sprintf("rebuild_%d.wav", i))
+		if err := convertToWAVFn(ffmpegPath, file, tempWav); err != nil {
+			return fmt.Errorf("convert %s: %w", file, err)
+		}
+		samples, rate, err := audio.ReadWAV(tempWav)
+		if err != nil || rate == 0 {
+			fmt.Fprintf(os.Stderr, "  warning: cannot measure duration of %s\n", filepath.Base(file))
+			continue
+		}
+		dur := float64(len(samples)) / float64(rate)
+		converted = append(converted, convertedWAV{tempWav, dur})
+		totalDuration += dur
+	}
+
+	if totalDuration < EnrollMinDurationSec {
+		return fmt.Errorf("speaker %q has only %.1fs of audio (need >= %.1fs); add more samples before rebuilding",
+			name, totalDuration, EnrollMinDurationSec)
+	}
+
+	// Step 3: extract one embedding per file.
+	embeddings := make([][]float32, 0, len(converted))
+	for _, w := range converted {
+		emb, err := extractFn(w.path)
+		if err != nil {
+			return fmt.Errorf("extract voiceprint for %s: %w", w.path, err)
+		}
+		if len(emb) == 0 {
+			continue
+		}
+		embeddings = append(embeddings, emb)
+	}
+	if len(embeddings) == 0 {
+		return fmt.Errorf("no valid embeddings extracted for %s", name)
+	}
+
+	mergedVec := averageEmbeddings(embeddings)
+
+	// Step 4: collect current audio hashes for the rebuilt KnownAudioHashes.
+	var allHashes []string
+	for _, file := range audioFiles {
+		h, err := FileHash(file)
+		if err != nil {
+			return fmt.Errorf("hash %s: %w", file, err)
+		}
+		allHashes = append(allHashes, h)
+	}
+
+	// Step 5: delete all existing .profile.json (originals — backups
+	// are kept), then write a single new file with only the merged
+	// voiceprint.
+	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
+		if !endsWithProfileJSON(e.Name()) {
+			continue
+		}
+		_ = os.Remove(filepath.Join(speakerDir, e.Name()))
+	}
+
+	now := time.Now()
+	profile := types.SpeakerProfile{
+		Name:             name,
+		CreatedAt:        now.Format(time.RFC3339),
+		UpdatedAt:        now.Format(time.RFC3339),
+		KnownAudioHashes: allHashes,
+		Voiceprints: []types.Voiceprint{{
+			Source:     fmt.Sprintf("rebuild (%d files)", len(embeddings)),
+			CreatedAt:  now.Format(time.RFC3339),
+			Dim:        len(mergedVec),
+			Model:      types.VoiceprintModel,
+			Projection: types.VoiceprintProjection,
+			Type:       "merged",
+			Vector:     mergedVec,
+		}},
+	}
+	filename := fmt.Sprintf("%s-%s.profile.json", now.Format("20060102"), shortUUID())
+	if err := store.SaveProfile(name, filename, profile); err != nil {
+		return fmt.Errorf("save profile for %s: %w", name, err)
+	}
+	return nil
+}
+
+// endsWithProfileJSON reports whether fname matches *.profile.json
+// (the canonical name shape produced by SaveProfile). Excludes our
+// own *.profile.json.bak.<ts>.json backups which end in .json but
+// contain ".bak." mid-name.
+func endsWithProfileJSON(fname string) bool {
+	return len(fname) > len(".profile.json") &&
+		fname[len(fname)-len(".profile.json"):] == ".profile.json"
+}
+
 // AutoEnroll processes all speakers: merges profile jsons, detects new audio
 // files, and computes a merged voiceprint by extracting per-file embeddings
 // and averaging them on the unit hypersphere. extractFn is called once per

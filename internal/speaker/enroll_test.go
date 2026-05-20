@@ -537,3 +537,124 @@ func TestAutoEnroll_MergesMultipleProfileJSONs(t *testing.T) {
 		t.Errorf("KnownAudioHashes = %v, want exactly [%q]", prof.KnownAudioHashes, currentHash)
 	}
 }
+
+func TestRebuildSpeaker_DiscardsAllVoiceprintsAndKeepsOnlyMerged(t *testing.T) {
+	dir := t.TempDir()
+	speakerDir := filepath.Join(dir, "Alice")
+	if err := os.MkdirAll(speakerDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	writeTestWAV(t, filepath.Join(speakerDir, "a.wav"), 20.0)
+
+	// Existing profile has TWO centroids + ONE merged (legacy shape).
+	existing := types.SpeakerProfile{
+		Voiceprints: []types.Voiceprint{
+			{Type: "centroid", Vector: []float32{1, 0, 0}, Dim: 3, Model: types.VoiceprintModel},
+			{Type: "centroid", Vector: []float32{0.9, 0.1, 0}, Dim: 3, Model: types.VoiceprintModel},
+			{Type: "merged", Vector: []float32{0.8, 0.2, 0}, Dim: 3, Model: types.VoiceprintModel},
+		},
+	}
+	data, _ := json.MarshalIndent(existing, "", "  ")
+	writeBytes(t, filepath.Join(speakerDir, "20240101-old.profile.json"), data)
+
+	store := NewStore(dir, supportedExtensions())
+	withFakeAudio(t)
+	ex := &recordingExtractor{embedding: []float32{0, 1, 0}}
+
+	if err := RebuildSpeaker(store, "Alice", "fake-ffmpeg", ex.extract); err != nil {
+		t.Fatalf("RebuildSpeaker: %v", err)
+	}
+
+	prof := loadProfileFile(t, store.GetSingleProfilePath("Alice"))
+	if len(prof.Voiceprints) != 1 {
+		t.Fatalf("voiceprints = %d, want exactly 1 (only merged)", len(prof.Voiceprints))
+	}
+	if prof.Voiceprints[0].Type != "merged" {
+		t.Errorf("voiceprint type = %q, want merged", prof.Voiceprints[0].Type)
+	}
+	// Vector should reflect the new extractor (per-file averaged), not the old [0.8, 0.2, 0].
+	got := prof.Voiceprints[0].Vector
+	if len(got) != 3 || got[1] < 0.99 {
+		t.Errorf("voiceprint vector = %v, want ≈[0,1,0] (new per-file averaged)", got)
+	}
+}
+
+func TestRebuildSpeaker_CreatesTimestampedBackup(t *testing.T) {
+	dir := t.TempDir()
+	speakerDir := filepath.Join(dir, "Alice")
+	if err := os.MkdirAll(speakerDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	writeTestWAV(t, filepath.Join(speakerDir, "a.wav"), 20.0)
+
+	original := types.SpeakerProfile{
+		Voiceprints: []types.Voiceprint{
+			{Type: "merged", Vector: []float32{0.5, 0.5, 0}, Dim: 3, Model: types.VoiceprintModel},
+		},
+	}
+	data, _ := json.MarshalIndent(original, "", "  ")
+	writeBytes(t, filepath.Join(speakerDir, "20240101-original.profile.json"), data)
+
+	store := NewStore(dir, supportedExtensions())
+	withFakeAudio(t)
+	ex := &recordingExtractor{embedding: []float32{1, 0, 0}}
+
+	if err := RebuildSpeaker(store, "Alice", "fake-ffmpeg", ex.extract); err != nil {
+		t.Fatalf("RebuildSpeaker: %v", err)
+	}
+
+	entries, _ := os.ReadDir(speakerDir)
+	var backups []string
+	for _, e := range entries {
+		if strings.Contains(e.Name(), ".bak.") {
+			backups = append(backups, e.Name())
+		}
+	}
+	if len(backups) != 1 {
+		t.Fatalf("backup files = %v, want exactly 1 (.bak.<timestamp>.json)", backups)
+	}
+	// Backup should contain the OLD voiceprint (0.5, 0.5, 0), not the new one.
+	backed := loadProfileFile(t, filepath.Join(speakerDir, backups[0]))
+	if len(backed.Voiceprints) != 1 || backed.Voiceprints[0].Vector[0] != 0.5 {
+		t.Errorf("backup voiceprint = %v, want old [0.5, 0.5, 0]", backed.Voiceprints)
+	}
+}
+
+func TestRebuildSpeaker_NoProfile_StillEnrollsFreshly(t *testing.T) {
+	dir := t.TempDir()
+	speakerDir := filepath.Join(dir, "Alice")
+	if err := os.MkdirAll(speakerDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	writeTestWAV(t, filepath.Join(speakerDir, "a.wav"), 20.0)
+
+	store := NewStore(dir, supportedExtensions())
+	withFakeAudio(t)
+	ex := &recordingExtractor{embedding: []float32{0, 1, 0}}
+
+	if err := RebuildSpeaker(store, "Alice", "fake-ffmpeg", ex.extract); err != nil {
+		t.Fatalf("RebuildSpeaker: %v", err)
+	}
+
+	prof := loadProfileFile(t, store.GetSingleProfilePath("Alice"))
+	if len(prof.Voiceprints) != 1 || prof.Voiceprints[0].Type != "merged" {
+		t.Errorf("voiceprints = %v, want exactly 1 merged", prof.Voiceprints)
+	}
+}
+
+func TestRebuildSpeaker_NoAudioFiles_Errors(t *testing.T) {
+	dir := t.TempDir()
+	speakerDir := filepath.Join(dir, "Alice")
+	if err := os.MkdirAll(speakerDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	store := NewStore(dir, supportedExtensions())
+	withFakeAudio(t)
+	ex := &recordingExtractor{embedding: []float32{1, 0, 0}}
+
+	err := RebuildSpeaker(store, "Alice", "fake-ffmpeg", ex.extract)
+	if err == nil {
+		t.Fatal("RebuildSpeaker: want error for speaker with no audio, got nil")
+	}
+}
