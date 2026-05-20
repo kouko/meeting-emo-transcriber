@@ -1,0 +1,96 @@
+{
+  "metadata": {
+    "file": "meeting.mp3",
+    "duration": "00:05:30",
+    "speakers_detected": 3,
+    "speakers_identified": 2,
+    "date": "2024-01-15T10:30:00Z"
+  },
+  "segments": [
+    {
+      "start": 0,
+      "end": 4.5,
+      "speaker": "Alice",
+      "emotion": {
+        "raw": "HAPPY",
+        "label": "Happy",
+        "display": "happily"
+      },
+      "audio_event": "Speech",
+      "language": "zh",
+      "text": "大家早安",
+      "confidence": {
+        "speaker": 0,
+        "emotion": 0
+      }
+    },
+    {
+      "start": 4.5,
+      "end": 7.2,
+      "speaker": "Alice",
+      "emotion": {
+        "raw": "HAPPY",
+        "label": "Happy",
+        "display": "happily"
+      },
+      "audio_event": "Speech",
+      "language": "zh",
+      "text": "今天會議的重點有三個",
+      "confidence": {
+        "speaker": 0,
+        "emotion": 0
+      }
+    },
+    {
+      "start": 7.5,
+      "end": 9,
+      "speaker": "Alice",
+      "emotion": {
+        "raw": "NEUTRAL",
+        "label": "Neutral",
+        "display": ""
+      },
+      "audio_event": "Laughter",
+      "language": "zh",
+      "text": "",
+      "confidence": {
+        "speaker": 0,
+        "emotion": 0
+      }
+    },
+    {
+      "start": 9.5,
+      "end": 14,
+      "speaker": "Bob",
+      "emotion": {
+        "raw": "ANGRY",
+        "label": "Angry",
+        "display": "angrily"
+      },
+      "audio_event": "Speech",
+      "language": "zh",
+      "text": "我有不同意見",
+      "confidence": {
+        "speaker": 0,
+        "emotion": 0
+      }
+    },
+    {
+      "start": 14,
+      "end": 18,
+      "speaker": "Unknown",
+      "emotion": {
+        "raw": "NEUTRAL",
+        "label": "Neutral",
+        "display": ""
+      },
+      "audio_event": "Speech",
+      "language": "en",
+      "text": "Excuse me, can I add something?",
+      "confidence": {
+        "speaker": 0,
+        "emotion": 0
+      }
+    }
+  ]
+}

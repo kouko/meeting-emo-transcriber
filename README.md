@@ -115,7 +115,11 @@ metr meeting.mp3 --no-cache                 # Force re-transcription (skip cache
 | `--format` | | `txt` | `txt`, `json`, `srt`, `all`, or comma-separated |
 | `--language` | `-l` | `auto` | `auto`, `zh-TW`, `zh`, `en`, `ja` |
 | `--threshold` | | `0.80` | Diarization clustering threshold (higher = more speakers) |
-| `--match-threshold` | | `0.55` | Speaker matching cosine similarity threshold |
+| `--match-threshold` | | `0.65` | Speaker matching cosine similarity threshold |
+| `--match-margin` | | `0.07` | Min cosine gap between best & runner-up profile to accept a match |
+| `--verify-segments` | | `false` | Re-verify each ASR segment against its matched profile; demote stray segments to Unknown |
+| `--verify-threshold` | | `0.50` | Per-segment verification threshold (looser than `--match-threshold`) |
+| `--verify-min-duration` | | `1.0` | Minimum segment duration (seconds) eligible for re-verification |
 | `--num-speakers` | | `0` | Expected number of speakers (0 = auto-detect) |
 | `--learning-mode` | `-L` | `false` | Create folders for all detected speakers for review |
 | `--enhance` | | `false` | DeepFilterNet3 noise reduction before processing |
@@ -123,16 +127,55 @@ metr meeting.mp3 --no-cache                 # Force re-transcription (skip cache
 | `--no-cache` | | `false` | Skip ASR cache and force re-transcription |
 | `--prompt` | | | Custom vocabulary/context hints for ASR (comma-separated) |
 | `--speakers` | | `~/metr-speakers` | Speakers directory path |
+| `--dry-run` | | `false` | Skip ASR/emotion/output, only run diarize + matching (fast tuning) |
 
 ### Other Commands
 
 ```bash
-metr init                          # Initialize speakers directory + config template
-metr enroll [--force]              # Compute speaker embeddings from audio samples
-metr speakers list                 # List registered speakers
-metr pack                          # Copy ~/.metr → metr-speakers/_metr/ (portable)
-metr unpack                        # Copy metr-speakers/_metr/ → ~/.metr/ (local)
+metr init                                    # Initialize speakers directory + config template
+metr enroll [--force]                        # Compute speaker embeddings from audio samples
+metr speakers list                           # List registered speakers
+metr speakers inspect <name>                 # Report intra/inter cosine stats for one speaker (diagnostic)
+metr speakers verify --name <X> --audio f    # Verify a test audio against an enrolled speaker
+metr pack                                    # Copy ~/.metr → metr-speakers/_metr/ (portable)
+metr unpack                                  # Copy metr-speakers/_metr/ → ~/.metr/ (local)
 ```
+
+### Speaker Matching Architecture
+
+The matcher maps each diarization cluster to either an enrolled name or a
+fresh `speaker_N` placeholder, in three stages:
+
+1. **Score all clusters first.** Cosine similarity between every cluster
+   centroid (WeSpeaker 256-d, from FluidAudio) and every enrolled
+   profile's voiceprints is computed up front.
+2. **Greedy one-to-one assignment by descending score.** Each enrolled
+   name can be claimed by at most one cluster, so if diarization
+   accidentally split Alice into two clusters, only the higher-similarity
+   one becomes "Alice" — the other falls through to a new `speaker_N`.
+   Equivalent to Hungarian assignment for the small cluster × profile
+   sizes typical of meeting transcription.
+3. **Two-gate decision per cluster.** Accept the assignment only if:
+   - `best_cosine >= match_threshold` (default 0.65), *and*
+   - `best_cosine − runner_up_cosine >= match_margin` (default 0.07).
+
+   A cluster that fails either gate becomes `speaker_N` (or `Unknown`
+   when its longest segment is below `min_sample_duration`).
+
+Optional per-segment re-verification (`--verify-segments`) re-extracts an
+embedding for each ASR segment and demotes any individual segment whose
+cosine falls below `--verify-threshold` (default 0.50) to `Unknown` —
+catching stray speech that diarization merged into the wrong cluster.
+
+Enrolled voiceprints are computed by extracting one embedding per audio
+file, then L2-normalising and averaging on the unit hypersphere — the
+canonical speaker-verification recipe. Enrollment is refused when total
+clean speech is below 15 seconds (`EnrollMinDurationSec`), since short
+samples produce unreliable embeddings.
+
+Use `metr speakers inspect <name>` to see the intra-/inter-class cosine
+distribution before tuning thresholds, and `metr <audio> --dry-run` to
+iterate on threshold values without paying the ASR cost.
 
 ## Configuration
 

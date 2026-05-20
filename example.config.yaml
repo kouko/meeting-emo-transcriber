@@ -21,12 +21,37 @@ language: "auto"
 # Range: 0.0 - 1.0
 threshold: 0.80
 
-# Speaker matching threshold, cosine similarity (default: 0.55)
+# Speaker matching threshold, cosine similarity (default: 0.65)
 # Used when matching diarized clusters to enrolled speaker profiles.
-#   Higher value (e.g. 0.7) -> stricter matching, fewer false positives
-#   Lower value  (e.g. 0.4) -> more lenient, may match wrong speakers
+# WeSpeaker / FluidAudio embeddings: EER ~0.65-0.75, so 0.65 is a balanced
+# default. Lower values produce more false positives on similar voices.
 # Range: 0.0 - 1.0
-match_threshold: 0.55
+match_threshold: 0.65
+
+# Speaker matching margin (default: 0.07)
+# Minimum cosine similarity gap between the best and second-best enrolled
+# profile required to accept a match. Smaller gaps are treated as ambiguous
+# and the cluster is reassigned to a fresh speaker_N for manual review.
+# Set to 0.0 to disable the margin guard.
+match_margin: 0.07
+
+# Per-segment re-verification (default: false)
+# After cluster-level assignment, re-check each ASR segment's embedding
+# against the matched profile. Individual segments scoring below
+# verify_segments_threshold are demoted to "Unknown" — useful when a
+# cluster occasionally absorbs stray speech from another speaker.
+# Adds one batched embedding extraction per recording.
+verify_segments: false
+
+# Per-segment verify threshold (default: 0.50)
+# Looser than match_threshold because cluster-level assignment is already
+# committed; segment-level just rejects clearly-off members.
+verify_segments_threshold: 0.50
+
+# Per-segment verify minimum duration (default: 1.0)
+# Segments shorter than this are too short for a reliable embedding and
+# keep their cluster-level label.
+verify_segments_min_duration: 1.0
 
 # Output format (default: "txt")
 # Supported: "txt", "json", "srt", "all" (generates all three)

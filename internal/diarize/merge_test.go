@@ -39,10 +39,10 @@ func TestPersistUnknownSpeaker_RMSFilter(t *testing.T) {
 		},
 	}
 
-	persistUnknownSpeaker(store, "test_speaker", "C1", diarResult, wavSamples, sampleRate, 0.01)
+	speakerDir := filepath.Join(store.Root(), "test_speaker")
+	persistUnknownSpeaker(speakerDir, "C1", diarResult, wavSamples, sampleRate, 0.01)
 
 	// Should save 2 WAV files (the two loud segments), not the silent one
-	speakerDir := filepath.Join(dir, "test_speaker")
 	entries, err := os.ReadDir(speakerDir)
 	if err != nil {
 		t.Fatalf("read speaker dir: %v", err)
@@ -74,10 +74,10 @@ func TestPersistUnknownSpeaker_AllSilent(t *testing.T) {
 		},
 	}
 
-	persistUnknownSpeaker(store, "silent_speaker", "C1", diarResult, wavSamples, sampleRate, 0.01)
+	speakerDir := filepath.Join(store.Root(), "silent_speaker")
+	persistUnknownSpeaker(speakerDir, "C1", diarResult, wavSamples, sampleRate, 0.01)
 
 	// Should save 0 WAV files, but profile.json should still exist
-	speakerDir := filepath.Join(dir, "silent_speaker")
 	entries, err := os.ReadDir(speakerDir)
 	if err != nil {
 		t.Fatalf("read speaker dir: %v", err)
@@ -125,9 +125,10 @@ func TestResolveSpeakerNames_ShortSegmentsMarkedUnknown(t *testing.T) {
 	names, err := ResolveSpeakerNames(
 		speakerIDs, diarResult, wavSamples, sampleRate,
 		[]types.SpeakerProfile{}, // no enrolled profiles
-		0.55, store, "", false,
+		0.55, 0.07, store, "", false,
 		15.0, // minSampleDuration
 		0.01, // minSampleRMS
+		true, // discover
 	)
 	if err != nil {
 		t.Fatalf("ResolveSpeakerNames: %v", err)
@@ -169,9 +170,10 @@ func TestResolveSpeakerNames_ZeroThresholdAllowsAll(t *testing.T) {
 
 	names, err := ResolveSpeakerNames(
 		speakerIDs, diarResult, wavSamples, sampleRate,
-		[]types.SpeakerProfile{}, 0.55, store, "", false,
+		[]types.SpeakerProfile{}, 0.55, 0.07, store, "", false,
 		0.0,  // minSampleDuration = 0 → allow all
 		0.01,
+		true, // discover
 	)
 	if err != nil {
 		t.Fatalf("ResolveSpeakerNames: %v", err)
@@ -180,5 +182,42 @@ func TestResolveSpeakerNames_ZeroThresholdAllowsAll(t *testing.T) {
 	// Even 3s segment should get speaker_1 when threshold is 0
 	if names[0] != "speaker_1" {
 		t.Errorf("names[0] = %q, want speaker_1 (minSampleDuration=0 allows all)", names[0])
+	}
+}
+
+func TestResolveSpeakerNames_NoDiscover_DoesNotCreateSpeakerN(t *testing.T) {
+	dir := t.TempDir()
+	store := speaker.NewStore(dir, config.SupportedAudioExtensions())
+	sampleRate := 16000
+
+	// 30 seconds of audio so the cluster easily clears minSampleDuration.
+	wavSamples := generateSineWAV(sampleRate, 30.0, 0.5)
+
+	diarResult := &DiarizeResult{
+		Segments: []Segment{
+			{Start: 0, End: 20, Speaker: "C1"},
+		},
+		SpeakerVoiceprints: map[string][]float64{},
+	}
+	speakerIDs := []string{"C1"}
+
+	// Discover OFF — the 20s unmatched cluster MUST fall through to
+	// "Unknown" instead of being persisted as speaker_N.
+	names, err := ResolveSpeakerNames(
+		speakerIDs, diarResult, wavSamples, sampleRate,
+		[]types.SpeakerProfile{},
+		0.55, 0.07, store, "", false,
+		15.0, 0.01,
+		false, // discover
+	)
+	if err != nil {
+		t.Fatalf("ResolveSpeakerNames: %v", err)
+	}
+
+	if names[0] != "Unknown" {
+		t.Errorf("names[0] = %q, want Unknown when discover=false", names[0])
+	}
+	if _, err := os.Stat(filepath.Join(dir, "speaker_1")); err == nil {
+		t.Error("speaker_1 directory MUST NOT exist when discover=false")
 	}
 }

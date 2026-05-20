@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/kouko/meeting-emo-transcriber/internal/audio"
 	"github.com/kouko/meeting-emo-transcriber/internal/types"
 )
 
@@ -43,6 +44,8 @@ func (s *Store) Root() string {
 }
 
 // List returns the names of all subdirectories in the root (each is a speaker).
+// Entries whose name starts with "_" are reserved (e.g. "_metr/" holds the
+// config file and learn-mode review output) and are excluded.
 func (s *Store) List() ([]string, error) {
 	entries, err := os.ReadDir(s.root)
 	if err != nil {
@@ -54,9 +57,13 @@ func (s *Store) List() ([]string, error) {
 
 	var names []string
 	for _, e := range entries {
-		if e.IsDir() {
-			names = append(names, e.Name())
+		if !e.IsDir() {
+			continue
 		}
+		if strings.HasPrefix(e.Name(), "_") {
+			continue
+		}
+		names = append(names, e.Name())
 	}
 	return names, nil
 }
@@ -97,6 +104,7 @@ func (s *Store) LoadProfile(name string) (*types.SpeakerProfile, error) {
 	merged := &types.SpeakerProfile{
 		Name: name,
 	}
+	hashSet := make(map[string]struct{})
 	found := false
 
 	for _, e := range entries {
@@ -120,8 +128,16 @@ func (s *Store) LoadProfile(name string) (*types.SpeakerProfile, error) {
 		// Merge voiceprints
 		merged.Voiceprints = append(merged.Voiceprints, p.Voiceprints...)
 
-		// Merge known audio hashes
-		merged.KnownAudioHashes = append(merged.KnownAudioHashes, p.KnownAudioHashes...)
+		// Merge known audio hashes, deduplicating (MergeProfileFiles already
+		// dedups on write, but profile files written by older versions or
+		// manually edited may contain duplicates).
+		for _, h := range p.KnownAudioHashes {
+			if _, seen := hashSet[h]; seen {
+				continue
+			}
+			hashSet[h] = struct{}{}
+			merged.KnownAudioHashes = append(merged.KnownAudioHashes, h)
+		}
 
 		// Track earliest created_at and latest updated_at
 		if merged.CreatedAt == "" || (p.CreatedAt != "" && p.CreatedAt < merged.CreatedAt) {
@@ -267,6 +283,29 @@ func (s *Store) ListAudioFiles(speaker string) ([]string, error) {
 		}
 	}
 	return files, nil
+}
+
+// TotalAudioDuration returns the summed playback duration of all WAV files
+// enrolled for a speaker. Non-WAV files and files that fail to decode are
+// silently skipped — the result is a best-effort lower bound used to flag
+// sub-quality enrollments (< EnrollMinDurationSec).
+func (s *Store) TotalAudioDuration(speaker string) (float64, error) {
+	files, err := s.ListAudioFiles(speaker)
+	if err != nil {
+		return 0, err
+	}
+	var total float64
+	for _, path := range files {
+		if strings.ToLower(filepath.Ext(path)) != ".wav" {
+			continue
+		}
+		samples, rate, err := audio.ReadWAV(path)
+		if err != nil || rate == 0 {
+			continue
+		}
+		total += float64(len(samples)) / float64(rate)
+	}
+	return total, nil
 }
 
 // FindNewAudioFiles returns audio files whose hash is NOT in any profile's known_audio_hashes.

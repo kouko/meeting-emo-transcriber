@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/kouko/meeting-emo-transcriber/internal/audio"
 	"github.com/kouko/meeting-emo-transcriber/internal/types"
 )
 
@@ -38,6 +39,38 @@ func TestStore_ListWithSpeakers(t *testing.T) {
 	}
 	if len(names) != 2 {
 		t.Errorf("expected 2 speakers, got %d: %v", len(names), names)
+	}
+}
+
+// _-prefixed directories are reserved for system use (e.g. _metr for
+// config + learn-mode review output) and must never be treated as
+// enrolled speakers.
+func TestStore_List_SkipsUnderscoreDirs(t *testing.T) {
+	dir := t.TempDir()
+	os.MkdirAll(filepath.Join(dir, "Alice"), 0755)
+	os.MkdirAll(filepath.Join(dir, "_metr"), 0755)
+	os.MkdirAll(filepath.Join(dir, "_review"), 0755)
+	os.MkdirAll(filepath.Join(dir, "Bob"), 0755)
+	os.MkdirAll(filepath.Join(dir, "speaker_1"), 0755) // auto-discovered, still a speaker
+
+	store := NewStore(dir, supportedExtensions())
+	names, err := store.List()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := make(map[string]bool)
+	for _, n := range names {
+		got[n] = true
+	}
+	for _, want := range []string{"Alice", "Bob", "speaker_1"} {
+		if !got[want] {
+			t.Errorf("expected %q in list, missing", want)
+		}
+	}
+	for _, banned := range []string{"_metr", "_review"} {
+		if got[banned] {
+			t.Errorf("expected %q to be filtered, but appeared in list", banned)
+		}
 	}
 }
 
@@ -89,6 +122,50 @@ func TestStore_LoadProfiles_WithProfile(t *testing.T) {
 	}
 	if profiles[0].Name != "Alice" {
 		t.Errorf("expected Alice, got %q", profiles[0].Name)
+	}
+}
+
+// When multiple *.profile.json files reference the same audio hash (which
+// happens after manual edits or when older versions wrote duplicates),
+// LoadProfile must dedup. Otherwise FindNewAudioFiles sees a longer
+// known_hashes list than expected and the merge profile grows unbounded
+// over successive auto-enrolls.
+func TestStore_LoadProfile_DedupsKnownAudioHashes(t *testing.T) {
+	dir := t.TempDir()
+	speakerDir := filepath.Join(dir, "Alice")
+	os.MkdirAll(speakerDir, 0755)
+
+	common := "sha256:0123456789abcdef"
+	p1 := types.SpeakerProfile{
+		KnownAudioHashes: []string{common, "sha256:aaa"},
+	}
+	p2 := types.SpeakerProfile{
+		KnownAudioHashes: []string{common, "sha256:bbb"},
+	}
+	d1, _ := json.MarshalIndent(p1, "", "  ")
+	d2, _ := json.MarshalIndent(p2, "", "  ")
+	os.WriteFile(filepath.Join(speakerDir, "20240101-aaaa.profile.json"), d1, 0644)
+	os.WriteFile(filepath.Join(speakerDir, "20240102-bbbb.profile.json"), d2, 0644)
+
+	store := NewStore(dir, supportedExtensions())
+	prof, err := store.LoadProfile("Alice")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if prof == nil {
+		t.Fatal("profile is nil")
+	}
+	// Expect 3 unique hashes, not 4.
+	if len(prof.KnownAudioHashes) != 3 {
+		t.Errorf("KnownAudioHashes len = %d, want 3 (deduped). Got %v",
+			len(prof.KnownAudioHashes), prof.KnownAudioHashes)
+	}
+	seen := map[string]bool{}
+	for _, h := range prof.KnownAudioHashes {
+		if seen[h] {
+			t.Errorf("duplicate hash in merged profile: %q", h)
+		}
+		seen[h] = true
 	}
 }
 
@@ -206,5 +283,69 @@ func TestStoreRoot(t *testing.T) {
 	store := NewStore(dir, []string{".wav"})
 	if store.Root() != dir {
 		t.Errorf("Root() = %q, want %q", store.Root(), dir)
+	}
+}
+
+// writeSilentWAV creates a valid 16kHz mono WAV with the given duration.
+func writeSilentWAV(t *testing.T, path string, durationSec float64) {
+	t.Helper()
+	sampleRate := 16000
+	n := int(durationSec * float64(sampleRate))
+	samples := make([]float32, n)
+	if err := audio.WriteWAV(path, samples, sampleRate); err != nil {
+		t.Fatalf("WriteWAV: %v", err)
+	}
+}
+
+func TestStore_TotalAudioDuration_Sums(t *testing.T) {
+	dir := t.TempDir()
+	speakerDir := filepath.Join(dir, "Alice")
+	os.MkdirAll(speakerDir, 0755)
+	writeSilentWAV(t, filepath.Join(speakerDir, "a.wav"), 2.0)
+	writeSilentWAV(t, filepath.Join(speakerDir, "b.wav"), 4.0)
+	writeSilentWAV(t, filepath.Join(speakerDir, "c.wav"), 6.0)
+
+	store := NewStore(dir, supportedExtensions())
+	got, err := store.TotalAudioDuration("Alice")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := 12.0
+	if got < want-0.05 || got > want+0.05 {
+		t.Errorf("TotalAudioDuration = %.3f, want ~%.3f", got, want)
+	}
+}
+
+func TestStore_TotalAudioDuration_NoFiles(t *testing.T) {
+	dir := t.TempDir()
+	speakerDir := filepath.Join(dir, "Alice")
+	os.MkdirAll(speakerDir, 0755)
+
+	store := NewStore(dir, supportedExtensions())
+	got, err := store.TotalAudioDuration("Alice")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != 0 {
+		t.Errorf("TotalAudioDuration empty = %.3f, want 0", got)
+	}
+}
+
+func TestStore_TotalAudioDuration_SkipsUnreadable(t *testing.T) {
+	dir := t.TempDir()
+	speakerDir := filepath.Join(dir, "Alice")
+	os.MkdirAll(speakerDir, 0755)
+	writeSilentWAV(t, filepath.Join(speakerDir, "good.wav"), 3.0)
+	// Corrupt file with .wav extension — must be skipped silently
+	os.WriteFile(filepath.Join(speakerDir, "bad.wav"), []byte("not a wav"), 0644)
+
+	store := NewStore(dir, supportedExtensions())
+	got, err := store.TotalAudioDuration("Alice")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := 3.0
+	if got < want-0.05 || got > want+0.05 {
+		t.Errorf("TotalAudioDuration with bad file = %.3f, want ~%.3f", got, want)
 	}
 }

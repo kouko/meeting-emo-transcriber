@@ -6,14 +6,12 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
-	"time"
 
+	"github.com/kouko/meeting-emo-transcriber/embedded"
 	"github.com/kouko/meeting-emo-transcriber/internal/asr"
 	"github.com/kouko/meeting-emo-transcriber/internal/audio"
 	"github.com/kouko/meeting-emo-transcriber/internal/config"
-	"github.com/kouko/meeting-emo-transcriber/embedded"
 	"github.com/kouko/meeting-emo-transcriber/internal/diarize"
-	"github.com/kouko/meeting-emo-transcriber/internal/emotion"
 	"github.com/kouko/meeting-emo-transcriber/internal/models"
 	"github.com/kouko/meeting-emo-transcriber/internal/output"
 	"github.com/kouko/meeting-emo-transcriber/internal/punctuation"
@@ -25,20 +23,26 @@ import (
 
 func newTranscribeCmd() *cobra.Command {
 	var (
-		inputPath      string
-		outputPath     string
-		format         string
-		language       string
-		threshold      float32
-		matchThreshold float32
-		numSpeakers    int
-		learn          bool
-		enhance        bool
-		normalize      bool
-		noCache           bool
-		prompt            string
-		minSampleDuration float64
-		minSampleRMS      float64
+		inputPath                 string
+		outputPath                string
+		format                    string
+		language                  string
+		threshold                 float32
+		matchThreshold            float32
+		matchMargin               float32
+		numSpeakers               int
+		dryRun                    bool
+		noDiscover                bool
+		learn                     bool
+		enhance                   bool
+		normalize                 bool
+		noCache                   bool
+		prompt                    string
+		minSampleDuration         float64
+		minSampleRMS              float64
+		verifySegments            bool
+		verifySegmentsThreshold   float32
+		verifySegmentsMinDuration float64
 	)
 	cmd := &cobra.Command{
 		Use:   "transcribe --input <audio file>",
@@ -53,6 +57,12 @@ Examples:
   metr transcribe --input meeting.mp3 --enhance --normalize
   metr transcribe --input meeting.mp3 -L`,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			// Surface legacy-config warnings up-front (not a numbered step —
+			// pure side-effect that appears even when validation below fails).
+			for _, w := range config.LegacyConfigWarnings(speakersDir) {
+				fmt.Fprintf(os.Stderr, "warning: %s\n", w)
+			}
+
 			// 1. Validate input file exists
 			if _, err := os.Stat(inputPath); err != nil {
 				return fmt.Errorf("input file not found: %w", err)
@@ -72,6 +82,9 @@ Examples:
 			if cmd.Flags().Changed("match-threshold") {
 				cfg.MatchThreshold = float64(matchThreshold)
 			}
+			if cmd.Flags().Changed("match-margin") {
+				cfg.MatchMargin = float64(matchMargin)
+			}
 			if cmd.Flags().Changed("format") {
 				cfg.Format = format
 			}
@@ -81,13 +94,29 @@ Examples:
 			if cmd.Flags().Changed("min-sample-rms") {
 				cfg.MinSampleRMS = minSampleRMS
 			}
+			if cmd.Flags().Changed("no-discover") && noDiscover {
+				cfg.Discover = false
+			}
+			if cmd.Flags().Changed("verify-segments") {
+				cfg.VerifySegments = verifySegments
+			}
+			if cmd.Flags().Changed("verify-threshold") {
+				cfg.VerifySegmentsThreshold = float64(verifySegmentsThreshold)
+			}
+			if cmd.Flags().Changed("verify-min-duration") {
+				cfg.VerifySegmentsMinDuration = verifySegmentsMinDuration
+			}
 			// Sync back to local vars so downstream code uses merged values
 			language = cfg.Language
 			threshold = float32(cfg.Threshold)
 			matchThreshold = float32(cfg.MatchThreshold)
+			matchMargin = float32(cfg.MatchMargin)
 			format = cfg.Format
 			minSampleDuration = cfg.MinSampleDuration
 			minSampleRMS = cfg.MinSampleRMS
+			verifySegments = cfg.VerifySegments
+			verifySegmentsThreshold = float32(cfg.VerifySegmentsThreshold)
+			verifySegmentsMinDuration = cfg.VerifySegmentsMinDuration
 
 			// 3. Extract embedded binaries
 			fmt.Fprintf(os.Stderr, "[1/9] Extracting embedded binaries...\n")
@@ -107,11 +136,16 @@ Examples:
 			defer sherpaClient.Close()
 
 			// 4. Ensure ASR model
-			fmt.Fprintf(os.Stderr, "[2/9] Ensuring ASR model...\n")
-			asrModelName := models.ResolveASRModel(language)
-			asrModelPath, err := models.EnsureModel(asrModelName)
-			if err != nil {
-				return fmt.Errorf("ensure ASR model: %w", err)
+			var asrModelPath string
+			if !dryRun {
+				fmt.Fprintf(os.Stderr, "[2/9] Ensuring ASR model...\n")
+				asrModelName := models.ResolveASRModel(language)
+				asrModelPath, err = models.EnsureModel(asrModelName)
+				if err != nil {
+					return fmt.Errorf("ensure ASR model: %w", err)
+				}
+			} else {
+				fmt.Fprintf(os.Stderr, "[dry-run] Skipping ASR model + emotion classifier — diarize + matching only\n")
 			}
 
 			// 5. Create temp dir and convert to WAV
@@ -141,53 +175,55 @@ Examples:
 				tempWavPath = enhancedPath
 			}
 
-			// 7. Run ASR
-			fmt.Fprintf(os.Stderr, "[4/9] Running speech recognition...\n")
-			// Merge --prompt + config vocabulary + enrolled speaker names
-			allPrompt := mergePrompts(prompt, cfg.Vocabulary)
-			if names, err := listSpeakerNames(speakersDir); err == nil && len(names) > 0 {
-				allPrompt = appendSpeakerNames(allPrompt, names)
-			}
-			if allPrompt != "" {
-				fmt.Fprintf(os.Stderr, "  --prompt=%q\n", allPrompt)
-			}
-
-			whisperCfg := asr.WhisperConfig{
-				BinPath:      bins.WhisperCLI,
-				ModelPath:    asrModelPath,
-				Language:     language,
-				Threads:      cfg.Threads,
-				Prompt:       allPrompt,
-			}
+			// 7. Run ASR (skipped in dry-run)
 			var results []types.ASRResult
-			if noCache {
-				results, err = asr.Transcribe(whisperCfg, tempWavPath)
-			} else {
-				results, err = asr.TranscribeWithCache(whisperCfg, tempWavPath)
-			}
-			if err != nil {
-				return fmt.Errorf("transcribe: %w", err)
-			}
-
-			// 5. Initialize punctuator (ZH/EN only, skip JA) — used later in TXT output
 			var punctFunc func(string) string
-			if language != "ja" {
-				puncModelDir, puncErr := models.EnsureModel("ct-punc-zh-en-int8")
-				if puncErr == nil {
-					punc, puncInitErr := punctuation.NewPunctuator(sherpaClient, puncModelDir, cfg.Threads)
-					if puncInitErr == nil {
-						fmt.Fprintf(os.Stderr, "[5/9] Punctuation model loaded\n")
-						defer punc.Close()
-						lang := language
-						punctFunc = func(text string) string {
-							return punc.AddPunct(text, lang)
-						}
-					} else {
-						puncErr = puncInitErr
-					}
+			if !dryRun {
+				fmt.Fprintf(os.Stderr, "[4/9] Running speech recognition...\n")
+				// Merge --prompt + config vocabulary + enrolled speaker names
+				allPrompt := mergePrompts(prompt, cfg.Vocabulary)
+				if names, err := listSpeakerNames(speakersDir); err == nil && len(names) > 0 {
+					allPrompt = appendSpeakerNames(allPrompt, names)
 				}
-				if puncErr != nil {
-					fmt.Fprintf(os.Stderr, "  Warning: punctuation skipped: %v\n", puncErr)
+				if allPrompt != "" {
+					fmt.Fprintf(os.Stderr, "  --prompt=%q\n", allPrompt)
+				}
+
+				whisperCfg := asr.WhisperConfig{
+					BinPath:   bins.WhisperCLI,
+					ModelPath: asrModelPath,
+					Language:  language,
+					Threads:   cfg.Threads,
+					Prompt:    allPrompt,
+				}
+				if noCache {
+					results, err = asr.Transcribe(whisperCfg, tempWavPath)
+				} else {
+					results, err = asr.TranscribeWithCache(whisperCfg, tempWavPath)
+				}
+				if err != nil {
+					return fmt.Errorf("transcribe: %w", err)
+				}
+
+				// 5. Initialize punctuator (ZH/EN only, skip JA) — used later in TXT output
+				if language != "ja" {
+					puncModelDir, puncErr := models.EnsureModel("ct-punc-zh-en-int8")
+					if puncErr == nil {
+						punc, puncInitErr := punctuation.NewPunctuator(sherpaClient, puncModelDir, cfg.Threads)
+						if puncInitErr == nil {
+							fmt.Fprintf(os.Stderr, "[5/9] Punctuation model loaded\n")
+							defer punc.Close()
+							lang := language
+							punctFunc = func(text string) string {
+								return punc.AddPunct(text, lang)
+							}
+						} else {
+							puncErr = puncInitErr
+						}
+					}
+					if puncErr != nil {
+						fmt.Fprintf(os.Stderr, "  Warning: punctuation skipped: %v\n", puncErr)
+					}
 				}
 			}
 
@@ -211,11 +247,25 @@ Examples:
 			}
 
 			// 10. Assign speakers to ASR segments
-			speakerIDs := diarize.AssignSpeakers(results, diarResult.Segments)
+			// In dry-run, we have no ASR results; treat each diarization
+			// segment as a pseudo-ASR result so the matcher still sees the
+			// full cluster set and prints its decisions.
+			var speakerIDs []string
+			if dryRun {
+				results = make([]types.ASRResult, len(diarResult.Segments))
+				speakerIDs = make([]string, len(diarResult.Segments))
+				for i, seg := range diarResult.Segments {
+					results[i] = types.ASRResult{Start: seg.Start, End: seg.End}
+					speakerIDs[i] = seg.Speaker
+				}
+			} else {
+				speakerIDs = diarize.AssignSpeakers(results, diarResult.Segments)
+			}
 
 			// 11. Resolve speaker names (WeSpeaker 256-dim centroid embeddings)
 			fmt.Fprintf(os.Stderr, "[7/9] Resolving speaker identities...\n")
 			fmt.Fprintf(os.Stderr, "  --match-threshold=%.2f (higher=stricter matching, lower=more lenient)\n", matchThreshold)
+			fmt.Fprintf(os.Stderr, "  --match-margin=%.2f (min gap between best and runner-up profile)\n", matchMargin)
 			store := speaker.NewStore(speakersDir, config.SupportedAudioExtensions())
 
 			// Auto-enroll: extract voiceprint from concatenated wav
@@ -243,104 +293,76 @@ Examples:
 
 			speakerNames, err := diarize.ResolveSpeakerNames(
 				speakerIDs, diarResult, wavSamples, wavSampleRate,
-				profiles, matchThreshold, store, bins.Diarize, learn,
-				minSampleDuration, minSampleRMS,
+				profiles, matchThreshold, matchMargin, store, bins.Diarize, learn,
+				minSampleDuration, minSampleRMS, cfg.Discover,
 			)
 			if err != nil {
 				return fmt.Errorf("resolve speaker names: %w", err)
 			}
 
+			// 12b. Optional per-segment re-verification: re-check each ASR
+			// segment's embedding against its matched profile and demote
+			// any segment whose cosine falls below the (looser) verify
+			// threshold. Catches stray foreign speech merged into a cluster.
+			if verifySegments && len(profiles) > 0 {
+				fmt.Fprintf(os.Stderr,
+					"  --verify-segments enabled (threshold=%.2f, min-duration=%.1fs)\n",
+					verifySegmentsThreshold, verifySegmentsMinDuration)
+				asrResults := make([]types.ASRResult, len(results))
+				copy(asrResults, results)
+				batchExtract := func(wavPaths []string) ([][]float32, error) {
+					vp, err := diarize.ExtractVoiceprints(bins.Diarize, wavPaths)
+					if err != nil {
+						return nil, err
+					}
+					out := make([][]float32, len(vp))
+					for i, v := range vp {
+						emb := make([]float32, len(v.Vector))
+						for j, x := range v.Vector {
+							emb[j] = float32(x)
+						}
+						out[i] = emb
+					}
+					return out, nil
+				}
+				verifyTmpDir, err := os.MkdirTemp("", "met-verify-*")
+				if err != nil {
+					return fmt.Errorf("create verify temp dir: %w", err)
+				}
+				refined, verifyErr := diarize.RefineSpeakerNamesPerSegment(
+					speakerNames, asrResults, profiles, wavSamples, wavSampleRate,
+					batchExtract, verifySegmentsThreshold, verifySegmentsMinDuration, verifyTmpDir,
+				)
+				os.RemoveAll(verifyTmpDir)
+				if verifyErr != nil {
+					fmt.Fprintf(os.Stderr, "  warning: per-segment verify failed (%v), keeping cluster labels\n", verifyErr)
+				} else {
+					speakerNames = refined
+				}
+			}
+
+			// Dry-run: stop here. Matching decisions have been printed to
+			// stderr by ResolveSpeakerNames; no transcript is produced.
+			if dryRun {
+				fmt.Fprintf(os.Stderr, "\nDry run complete. No transcript written.\n")
+				fmt.Fprintf(os.Stderr, "Re-run without --dry-run, or with adjusted --match-threshold / --match-margin, to produce a transcript.\n")
+				return nil
+			}
+
 			// 13. Emotion classification + build segments
 			fmt.Fprintf(os.Stderr, "[8/9] Running emotion classification...\n")
-			emotionModelDir, err := models.EnsureModel("sensevoice-small-int8")
+			transcript, err := classifyEmotionsAndBuildSegments(
+				results, speakerNames, wavSamples, wavSampleRate,
+				sherpaClient, cfg.Threads, inputPath,
+			)
 			if err != nil {
-				return fmt.Errorf("ensure emotion model: %w", err)
-			}
-			classifier, err := emotion.NewClassifier(sherpaClient, emotionModelDir, cfg.Threads)
-			if err != nil {
-				return fmt.Errorf("init emotion classifier: %w", err)
-			}
-			defer classifier.Close()
-
-			segments := make([]types.TranscriptSegment, 0, len(results))
-			for i, r := range results {
-				segAudio := audio.ExtractSegment(wavSamples, wavSampleRate, r.Start, r.End)
-
-				emotionInfo := types.EmotionInfo{Label: "Neutral", Display: ""}
-				audioEvent := "Speech"
-				var emotionConf float32
-				if len(segAudio) > 0 {
-					emotionResult, event, classErr := classifier.Classify(segAudio, wavSampleRate)
-					if classErr == nil {
-						emotionInfo = types.EmotionInfo{
-							Raw:     emotionResult.Raw,
-							Label:   emotionResult.Label,
-							Display: emotionResult.Display,
-						}
-						audioEvent = event
-						emotionConf = emotionResult.Confidence
-					}
-				}
-
-				segments = append(segments, types.TranscriptSegment{
-					Start:      r.Start,
-					End:        r.End,
-					Speaker:    speakerNames[i],
-					Emotion:    emotionInfo,
-					AudioEvent: audioEvent,
-					Language:   r.Language,
-					Text:       r.Text,
-					Confidence: types.Confidence{Speaker: 0, Emotion: emotionConf},
-				})
+				return err
 			}
 
-			// 14. Build metadata with speaker counts
-			speakerSet := make(map[string]bool)
-			identified := 0
-			for _, seg := range segments {
-				speakerSet[seg.Speaker] = true
-				if !strings.HasPrefix(seg.Speaker, "speaker_") && seg.Speaker != "Unknown" {
-					identified++
-				}
-			}
-
-			// Calculate duration from last result's End time
-			var duration float64
-			if len(results) > 0 {
-				duration = results[len(results)-1].End
-			}
-
-			transcript := types.TranscriptResult{
-				Metadata: types.Metadata{
-					File:               filepath.Base(inputPath),
-					Duration:           time.Duration(duration * float64(time.Second)).String(),
-					SpeakersDetected:   len(speakerSet),
-					SpeakersIdentified: identified,
-					Date:               time.Now().Format(time.RFC3339),
-				},
-				Segments: segments,
-			}
-
-			// 15. Format and write output files
+			// 14. Format and write output files
 			fmt.Fprintf(os.Stderr, "[9/9] Writing output files...\n")
-			formats := config.ParseFormats(format)
-			for _, fmt_ := range formats {
-				outPath := resolveOutputPath(inputPath, outputPath, fmt_)
-				content, err := formatTranscript(fmt_, transcript, punctFunc)
-				if err != nil {
-					return fmt.Errorf("format %s: %w", fmt_, err)
-				}
-				// Add UTF-8 BOM for txt/srt so macOS text editors detect encoding correctly
-				var fileContent []byte
-				if fmt_ == "txt" || fmt_ == "srt" {
-					fileContent = append([]byte{0xEF, 0xBB, 0xBF}, []byte(content)...)
-				} else {
-					fileContent = []byte(content)
-				}
-				if err := os.WriteFile(outPath, fileContent, 0644); err != nil {
-					return fmt.Errorf("write %s: %w", outPath, err)
-				}
-				fmt.Fprintf(os.Stderr, "Written: %s\n", outPath)
+			if err := writeTranscriptOutputs(transcript, format, inputPath, outputPath, punctFunc); err != nil {
+				return err
 			}
 
 			// Save current settings to config.yaml for next run
@@ -372,6 +394,7 @@ Examples:
 				Language:          language,
 				Threshold:         float64(threshold),
 				MatchThreshold:    float64(matchThreshold),
+				MatchMargin:       float64(matchMargin),
 				Format:            format,
 				Vocabulary:        vocabToSave,
 				MinSampleDuration: minSampleDuration,
@@ -391,7 +414,13 @@ Examples:
 	cmd.Flags().StringVar(&format, "format", "txt", "output format: txt|json|srt|all (comma-separated)")
 	cmd.Flags().StringVarP(&language, "language", "l", "auto", "language: auto|zh-TW|zh|en|ja")
 	cmd.Flags().Float32Var(&threshold, "threshold", 0.8, "diarization clustering threshold (higher = more speakers)")
-	cmd.Flags().Float32Var(&matchThreshold, "match-threshold", 0.55, "speaker matching threshold for enrolled profiles")
+	cmd.Flags().Float32Var(&matchThreshold, "match-threshold", 0.65, "speaker matching threshold for enrolled profiles")
+	cmd.Flags().Float32Var(&matchMargin, "match-margin", 0.07, "minimum cosine gap between best and runner-up profile to accept a match")
+	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "skip ASR/emotion/output — only run diarize + speaker matching (fast threshold tuning)")
+	cmd.Flags().BoolVar(&noDiscover, "no-discover", false, "do not auto-create speaker_N folders for unmatched clusters (otherwise on by default; can also be set via _metr/config.yaml discover: false)")
+	cmd.Flags().BoolVar(&verifySegments, "verify-segments", false, "re-verify each ASR segment against its matched profile and demote stray segments to Unknown")
+	cmd.Flags().Float32Var(&verifySegmentsThreshold, "verify-threshold", 0.50, "per-segment verification threshold (looser than --match-threshold)")
+	cmd.Flags().Float64Var(&verifySegmentsMinDuration, "verify-min-duration", 1.0, "minimum segment duration (seconds) to re-verify")
 	cmd.Flags().IntVar(&numSpeakers, "num-speakers", 0, "expected number of speakers (0 = auto-detect)")
 	cmd.Flags().BoolVarP(&learn, "learning-mode", "L", false, "create folders for all clusters (including matched) for manual review")
 	cmd.Flags().BoolVar(&enhance, "enhance", false, "enhance audio with DeepFilterNet3 noise reduction before processing")

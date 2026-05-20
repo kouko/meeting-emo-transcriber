@@ -22,6 +22,7 @@ type Config struct {
 	Language       string
 	Threshold      float64
 	MatchThreshold float64
+	MatchMargin    float64 // minimum sim spread between best and runner-up profile to accept a match
 	Format         string
 	Strategy       string
 	Discover       bool
@@ -31,6 +32,15 @@ type Config struct {
 	Vocabulary        []string // custom vocabulary for whisper prompt
 	MinSampleDuration float64  // minimum segment duration (seconds) for auto-discovered speaker samples
 	MinSampleRMS      float64  // minimum RMS energy for speaker samples (0.0-1.0)
+
+	// Per-segment re-verification: after cluster-level assignment, re-check
+	// each ASR segment's embedding against the matched profile and demote
+	// individual segments whose cosine falls below VerifySegmentsThreshold.
+	// Adds one extra batch embedding pass per recording (cheap because
+	// metr-diarize batches the calls).
+	VerifySegments              bool
+	VerifySegmentsThreshold     float64
+	VerifySegmentsMinDuration   float64
 }
 
 // defaultModelsDir returns ~/.metr/models/
@@ -48,12 +58,16 @@ func Defaults() Config {
 	return Config{
 		Language:       "auto",
 		Threshold:      0.8,
-		MatchThreshold: 0.55,
+		MatchThreshold: 0.65,
+		MatchMargin:    0.07,
 		Format:         "txt",
 		Strategy:  "max_similarity",
 		Discover:          true,
 		MinSampleDuration: 15.0,
 		MinSampleRMS:      0.01,
+		VerifySegments:            false, // opt-in until validated on real recordings
+		VerifySegmentsThreshold:   0.50,
+		VerifySegmentsMinDuration: 1.0,
 		LogLevel:  "info",
 		Threads:   runtime.NumCPU(),
 		Models: Models{
@@ -78,6 +92,7 @@ func Load(configPath, speakersDir string) (Config, error) {
 	v.SetDefault("language", d.Language)
 	v.SetDefault("threshold", d.Threshold)
 	v.SetDefault("match_threshold", d.MatchThreshold)
+	v.SetDefault("match_margin", d.MatchMargin)
 	v.SetDefault("format", d.Format)
 	v.SetDefault("strategy", d.Strategy)
 	v.SetDefault("discover", d.Discover)
@@ -85,6 +100,9 @@ func Load(configPath, speakersDir string) (Config, error) {
 	v.SetDefault("threads", d.Threads)
 	v.SetDefault("min_sample_duration", d.MinSampleDuration)
 	v.SetDefault("min_sample_rms", d.MinSampleRMS)
+	v.SetDefault("verify_segments", d.VerifySegments)
+	v.SetDefault("verify_segments_threshold", d.VerifySegmentsThreshold)
+	v.SetDefault("verify_segments_min_duration", d.VerifySegmentsMinDuration)
 	v.SetDefault("models.whisper", d.Models.Whisper)
 	v.SetDefault("models.speaker", d.Models.Speaker)
 	v.SetDefault("models.emotion", d.Models.Emotion)
@@ -109,6 +127,7 @@ func Load(configPath, speakersDir string) (Config, error) {
 		Language:       v.GetString("language"),
 		Threshold:      v.GetFloat64("threshold"),
 		MatchThreshold: v.GetFloat64("match_threshold"),
+		MatchMargin:    v.GetFloat64("match_margin"),
 		Format:         v.GetString("format"),
 		Strategy:   v.GetString("strategy"),
 		Discover:   v.GetBool("discover"),
@@ -117,6 +136,9 @@ func Load(configPath, speakersDir string) (Config, error) {
 		Vocabulary:        v.GetStringSlice("vocabulary"),
 		MinSampleDuration: v.GetFloat64("min_sample_duration"),
 		MinSampleRMS:      v.GetFloat64("min_sample_rms"),
+		VerifySegments:            v.GetBool("verify_segments"),
+		VerifySegmentsThreshold:   v.GetFloat64("verify_segments_threshold"),
+		VerifySegmentsMinDuration: v.GetFloat64("verify_segments_min_duration"),
 		Models: Models{
 			Whisper: v.GetString("models.whisper"),
 			Speaker: v.GetString("models.speaker"),
@@ -126,11 +148,43 @@ func Load(configPath, speakersDir string) (Config, error) {
 	return cfg, nil
 }
 
+// LegacyConfigWarnings inspects the yaml at <speakersDir>/_metr/config.yaml
+// (or the backward-compat <speakersDir>/config.yaml) and returns user-facing
+// warnings when the file predates the speaker-matching overhaul. The trigger
+// is: file sets match_threshold but is missing match_margin — the
+// unmistakable signature of a yaml authored before the overhaul shipped.
+// Returns nil when no file exists or the file is current.
+func LegacyConfigWarnings(speakersDir string) []string {
+	if speakersDir == "" {
+		return nil
+	}
+	v := viper.New()
+	v.SetConfigName("config")
+	v.SetConfigType("yaml")
+	v.AddConfigPath(filepath.Join(speakersDir, "_metr"))
+	v.AddConfigPath(speakersDir)
+	if err := v.ReadInConfig(); err != nil {
+		return nil
+	}
+	hasThreshold := v.IsSet("match_threshold")
+	hasMargin := v.IsSet("match_margin")
+	if !hasThreshold || hasMargin {
+		return nil
+	}
+	threshold := v.GetFloat64("match_threshold")
+	msg := fmt.Sprintf(
+		"_metr/config.yaml pins match_threshold=%.2f without match_margin — this yaml predates the matching overhaul. New recommended defaults: match_threshold: 0.65 / match_margin: 0.07. Edit the yaml or pass --match-threshold / --match-margin to override.",
+		threshold,
+	)
+	return []string{msg}
+}
+
 // SaveableConfig holds user-facing settings to write to config.yaml.
 type SaveableConfig struct {
 	Language       string   `yaml:"language"`
 	Threshold      float64  `yaml:"threshold"`
 	MatchThreshold float64  `yaml:"match_threshold"`
+	MatchMargin    float64  `yaml:"match_margin"`
 	Format         string   `yaml:"format"`
 	Vocabulary        []string `yaml:"vocabulary,omitempty"`
 	MinSampleDuration float64  `yaml:"min_sample_duration"`
@@ -175,12 +229,19 @@ func writeConfigTemplate(configPath string, sc SaveableConfig) error {
 	lines = append(lines, "# Range: 0.0 - 1.0")
 	lines = append(lines, fmt.Sprintf("threshold: %.2f", sc.Threshold))
 	lines = append(lines, "")
-	lines = append(lines, "# Speaker matching threshold, cosine similarity (default: 0.55)")
+	lines = append(lines, "# Speaker matching threshold, cosine similarity (default: 0.65)")
 	lines = append(lines, "# Used when matching diarized clusters to enrolled speaker profiles.")
-	lines = append(lines, "#   Higher value (e.g. 0.7) -> stricter matching, fewer false positives")
-	lines = append(lines, "#   Lower value  (e.g. 0.4) -> more lenient, may match wrong speakers")
+	lines = append(lines, "# WeSpeaker / FluidAudio embeddings: EER ~0.65-0.75, so 0.65 is a")
+	lines = append(lines, "# balanced default. Lower -> more lenient, may match wrong speakers.")
 	lines = append(lines, "# Range: 0.0 - 1.0")
 	lines = append(lines, fmt.Sprintf("match_threshold: %.2f", sc.MatchThreshold))
+	lines = append(lines, "")
+	lines = append(lines, "# Speaker matching margin (default: 0.07)")
+	lines = append(lines, "# Minimum cosine similarity gap between the best and second-best enrolled")
+	lines = append(lines, "# profile required to accept a match. Smaller gaps are treated as")
+	lines = append(lines, "# ambiguous and the cluster is reassigned as a new speaker.")
+	lines = append(lines, "# Range: 0.0 - 0.3 (0 disables the margin guard)")
+	lines = append(lines, fmt.Sprintf("match_margin: %.2f", sc.MatchMargin))
 	lines = append(lines, "")
 	lines = append(lines, `# Output format (default: "txt")`)
 	lines = append(lines, `# Supported: "txt", "json", "srt", "all" (generates all three)`)
@@ -223,6 +284,7 @@ func writeConfigCompact(configPath string, sc SaveableConfig) error {
 	lines = append(lines, fmt.Sprintf("language: %q", sc.Language))
 	lines = append(lines, fmt.Sprintf("threshold: %.2f", sc.Threshold))
 	lines = append(lines, fmt.Sprintf("match_threshold: %.2f", sc.MatchThreshold))
+	lines = append(lines, fmt.Sprintf("match_margin: %.2f", sc.MatchMargin))
 	lines = append(lines, fmt.Sprintf("format: %q", sc.Format))
 	lines = append(lines, fmt.Sprintf("min_sample_duration: %.1f", sc.MinSampleDuration))
 	lines = append(lines, fmt.Sprintf("min_sample_rms: %.2f", sc.MinSampleRMS))

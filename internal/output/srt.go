@@ -20,7 +20,15 @@ func (f *SRTFormatter) Format(result types.TranscriptResult) (string, error) {
 		if seg.Emotion.Display != "" {
 			fmt.Fprintf(&line, " [%s]", seg.Emotion.Display)
 		}
-		fmt.Fprintf(&line, " %s", seg.Text)
+		// Use ASR text when available; otherwise fall back to a non-speech
+		// audio event marker (e.g. "[laughter]") so the SRT entry has
+		// meaningful content. TXT output already does this — keep SRT
+		// consistent.
+		body := seg.Text
+		if body == "" {
+			body = types.AudioEventDisplayMap[seg.AudioEvent]
+		}
+		fmt.Fprintf(&line, " %s", body)
 		fmt.Fprintf(&b, "%s\n\n", strings.TrimSpace(line.String()))
 	}
 	return b.String(), nil
