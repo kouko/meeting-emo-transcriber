@@ -141,24 +141,25 @@ func newSpeakersInspectCmd() *cobra.Command {
 		Use:   "inspect <speaker-name>",
 		Short: "Inspect an enrolled speaker's voiceprint quality (intra/inter cosine)",
 		Long: `Inspect re-extracts an embedding from every audio file enrolled for
-a speaker, then reports:
+a speaker, then reports two views of its quality:
 
-  - Per-file cosine similarity to the speaker's merged voiceprint
-    (intra-class — high & consistent values mean reliable enrollment).
-  - Highest cosine vs every other enrolled speaker
-    (inter-class — high values flag a confusion risk).
-  - A "safety margin" = intra-min minus inter-max. Positive ≈ this
-    speaker is well separated from everyone else in the set.
+  - Per-file vs the single "merged" voiceprint (legacy view —
+    diagnoses when the merged centroid is stale from a pre-overhaul
+    enrollment).
+  - Per-file vs the BEST matching voiceprint in the profile (live
+    matcher view — mirrors transcribe-time BestSimilarity scoring).
 
-Note: intra-class and safety margin are computed against the single
-"merged" voiceprint stored in the profile. The live matcher used during
-transcribe scores each cluster against every stored voiceprint and
-keeps the max (BestSimilarity), so it is meaningfully more forgiving
-than the worst-case margin reported here. A negative margin is a
-warning, not a guarantee of misidentification.
+For each, a safety margin = intra-min − strongest inter-class score.
+Positive margin ≈ this speaker is well separated from everyone else.
+
+Use the best-of-all margin as the realistic confidence indicator; the
+merged margin is informational only — a negative merged margin with a
+positive best-of-all margin means an older centroid is shadowed by a
+better one in the same profile.
 
 Useful for tuning --match-threshold and --match-margin without running
-a full transcribe.`,
+a full transcribe. Pair with ` + "`metr enroll --rebuild --speaker <name>`" + ` to
+re-extract voiceprints under the current per-file averaging recipe.`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			target := args[0]
@@ -173,8 +174,7 @@ a full transcribe.`,
 			}
 			targetProfile.Name = target
 
-			merged := speaker.MergedVoiceprint(targetProfile)
-			if merged == nil {
+			if speaker.MergedVoiceprint(targetProfile) == nil {
 				return fmt.Errorf("speaker %q has no merged voiceprint — run `metr enroll` first", target)
 			}
 
@@ -253,7 +253,7 @@ a full transcribe.`,
 				embeddings[i] = emb
 			}
 
-			report := speaker.ComputeInspection(target, embeddings, merged, otherProfiles)
+			report := speaker.ComputeInspection(target, embeddings, *targetProfile, otherProfiles)
 
 			fmt.Printf("Inspecting speaker %q...\n\n", target)
 			fmt.Printf("Audio samples:\n")
@@ -275,11 +275,23 @@ a full transcribe.`,
 				}
 				fmt.Printf("  %s %-30s sim %.2f\n", marker, fileNames[i], sim)
 			}
-			fmt.Printf("  ─ mean %.2f  min %.2f  max %.2f\n\n",
-				report.IntraMean, report.IntraMin, report.IntraMax)
+			fmt.Printf("  ─ mean %.2f  min %.2f  max %.2f\n", report.IntraMean, report.IntraMin, report.IntraMax)
+
+			if len(report.BestOfAllIntraSims) > 0 {
+				fmt.Printf("Per-file vs BEST matching voiceprint (live matcher view):\n")
+				for i, sim := range report.BestOfAllIntraSims {
+					marker := " "
+					if sim < 0.5 {
+						marker = "⚠"
+					}
+					fmt.Printf("  %s %-30s sim %.2f\n", marker, fileNames[i], sim)
+				}
+				fmt.Printf("  ─ mean %.2f  min %.2f  max %.2f\n", report.BestOfAllIntraMean, report.BestOfAllIntraMin, report.BestOfAllIntraMax)
+			}
+			fmt.Println()
 
 			if len(report.Inter) > 0 {
-				fmt.Printf("vs Other enrolled profiles (inter-class):\n")
+				fmt.Printf("vs Other enrolled profiles (inter-class, merged-only):\n")
 				for _, s := range report.Inter {
 					marker := " "
 					if s.MaxSim > 0.5 {
@@ -288,13 +300,16 @@ a full transcribe.`,
 					fmt.Printf("  %s %-30s max sim %.2f\n", marker, s.OtherName, s.MaxSim)
 				}
 				fmt.Println()
-				fmt.Printf("Safety margin: %.2f (intra-min %.2f − strongest impostor %.2f)\n",
+				fmt.Printf("Merged safety margin:       %+.2f  (intra-min %.2f − strongest impostor %.2f)\n",
 					report.SafetyMargin, report.IntraMin, report.Inter[0].MaxSim)
-				fmt.Printf("  (computed vs the merged voiceprint only; live matcher uses max over all stored voiceprints and is more forgiving)\n")
-				if report.SafetyMargin < 0 {
-					fmt.Printf("  ⚠ negative margin against the merged voiceprint — at least one other speaker's stored voiceprint scores higher than this speaker's worst sample\n")
-				} else if report.SafetyMargin < 0.1 {
-					fmt.Printf("  ⚠ tight margin — consider raising --match-threshold or adding more enrollment audio\n")
+				fmt.Printf("Best-of-all safety margin:  %+.2f  (intra-min %.2f − worst per-file impostor %.2f)\n",
+					report.BestOfAllSafetyMargin, report.BestOfAllIntraMin, report.BestOfAllInterMax)
+				fmt.Printf("  Best-of-all is what the live matcher actually sees (max over every stored voiceprint).\n")
+				fmt.Printf("  Use it as the realistic confidence indicator; merged margin is a stale-centroid diagnostic.\n")
+				if report.BestOfAllSafetyMargin < 0 {
+					fmt.Printf("  ⚠ best-of-all margin is negative — live matcher may misclassify this speaker's audio\n")
+				} else if report.BestOfAllSafetyMargin < 0.1 {
+					fmt.Printf("  ⚠ tight best-of-all margin — consider raising --match-threshold or adding more enrollment audio\n")
 				}
 			} else {
 				fmt.Printf("(no other enrolled speakers to compare against)\n")

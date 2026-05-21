@@ -99,7 +99,10 @@ func BenchmarkComputeInspection_5Speakers(b *testing.B) {
 		others[i] = randProfile(r, "spk"+string(rune('A'+i)), 1)
 	}
 	b.ResetTimer()
+	targetProfile := types.SpeakerProfile{
+		Voiceprints: []types.Voiceprint{{Type: "merged", Vector: target}},
+	}
 	for i := 0; i < b.N; i++ {
-		_ = ComputeInspection("Alice", fileEmbs, target, others)
+		_ = ComputeInspection("Alice", fileEmbs, targetProfile, others)
 	}
 }

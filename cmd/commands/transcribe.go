@@ -291,10 +291,19 @@ Examples:
 				return fmt.Errorf("load speaker profiles: %w", err)
 			}
 
+			// --dry-run is contractually read-only: even when cfg.Discover is
+			// on, suppress speaker_N persistence so a probing run does not
+			// mutate the speakers store. Matching behaviour itself is still
+			// computed and reported on stderr.
+			discoverForRun := cfg.Discover
+			if dryRun && discoverForRun {
+				fmt.Fprintf(os.Stderr, "  --dry-run: suppressing speaker_N auto-discovery (read-only mode)\n")
+				discoverForRun = false
+			}
 			speakerNames, err := diarize.ResolveSpeakerNames(
 				speakerIDs, diarResult, wavSamples, wavSampleRate,
 				profiles, matchThreshold, matchMargin, store, bins.Diarize, learn,
-				minSampleDuration, minSampleRMS, cfg.Discover,
+				minSampleDuration, minSampleRMS, discoverForRun,
 			)
 			if err != nil {
 				return fmt.Errorf("resolve speaker names: %w", err)
