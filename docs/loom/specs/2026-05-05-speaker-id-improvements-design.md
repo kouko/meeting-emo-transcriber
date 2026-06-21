@@ -453,7 +453,7 @@ Fix 2 (mean-pool centroid)
 
 ## 10. 參考
 
-- 既有 spec：`docs/superpowers/specs/2026-04-05-diarization-refactor-design.md`（雙 pipeline 架構）
+- 既有 spec：`docs/loom/specs/2026-04-05-diarization-refactor-design.md`（雙 pipeline 架構）
 - 既有 PR：#14（PR #14 enrollment-side filter，本 spec 的 Fix 2 是 identification-side 對應）
 - WeSpeaker model：`fluidaudio_embedding_v1`（256d，封裝在 metr-diarize）
 - 對應 monkey-skills repo 的 `meeting-toolkit` plugin（待設立）為 skill 層

@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Implement 4 speaker-identification improvements per `docs/superpowers/specs/2026-05-05-speaker-id-improvements-design.md`: (1) EER threshold auto-calibration, (2) filter + mean-pool centroid recompute, (3) high-confidence continuous enrollment, (4) 3-tier confidence band output.
+**Goal:** Implement 4 speaker-identification improvements per `docs/loom/specs/2026-05-05-speaker-id-improvements-design.md`: (1) EER threshold auto-calibration, (2) filter + mean-pool centroid recompute, (3) high-confidence continuous enrollment, (4) 3-tier confidence band output.
 
 **Architecture:** Each fix is independent of the others (Fix 2 has zero deps; Fix 4/3 derive thresholds from Fix 1). Ship as **4 separate PRs** in order Fix 2 → Fix 1 → Fix 4 → Fix 3. No stacked PRs.
 
@@ -451,7 +451,7 @@ None.
 ### Documentation
 
 - [ ] README: update overview to mention 4 improvements + skill-wrapper plan link
-- [ ] docs/superpowers/specs/2026-05-05-speaker-id-improvements-design.md: keep as design reference (don't modify post-spec)
+- [ ] docs/loom/specs/2026-05-05-speaker-id-improvements-design.md: keep as design reference (don't modify post-spec)
 - [ ] CHANGELOG: tag a release once all 4 phases ship (suggest v0.x.y bump)
 
 ### Open questions to resolve during implementation
@@ -480,6 +480,6 @@ None.
 
 ## References
 
-- Design spec: `docs/superpowers/specs/2026-05-05-speaker-id-improvements-design.md`
-- Sister plan (binary's predecessor): `docs/superpowers/plans/2026-04-05-diarization-refactor.md`
+- Design spec: `docs/loom/specs/2026-05-05-speaker-id-improvements-design.md`
+- Sister plan (binary's predecessor): `docs/loom/plans/2026-04-05-diarization-refactor.md`
 - Skill wrapper (paired effort): `meeting-toolkit` plugin in `kouko/monkey-skills` (TBD design proposal)
